@@ -3730,7 +3730,7 @@ msgstr "புதிய {coolversion} ஐ ஆராயுங்கள்"
 
 #: welcome/welcome.html%2Bhtml.body.div.div.div.div.h2:27-7
 #: welcome/welcome.html%2Bhtml.body.div.div.div.div.h2:38-7
-msgid "Collabora Online Development Edition"
+msgid ""
 msgstr "ஒத்துழைப்பு நிகழ்நிலை மேம்பாட்டு பதிப்பு"
 
 #: welcome/welcome.html%2Bhtml.body.div.div.div.div.p:28-7
@@ -3754,7 +3754,7 @@ msgstr "அனைத்து மாற்றங்களையும் கண�
 msgid ""
 "Check the <a target=\"_blank\" href=\"https://www.collaboraonline.com/"
 "code-24-04-release-notes/\">release notes</a> and learn all about: The "
-"latest Collabora Online Development Edition, aimed at home users and small "
+"latest , aimed at home users and small "
 "teams."
 msgstr ""
 "<A இலக்கு = \"_ வெற்று\" href = \"https://www.collaboraonline.com/"
