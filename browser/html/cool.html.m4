@@ -46,7 +46,7 @@ m4_ifelse(MOBILEAPP, [true],
 ]
 )
 
-<input type="hidden" id="init-product-branding-name" value="%PRODUCT_BRANDING_NAME%" />
+<input type="hidden" id="init-product-branding-name" value="————————" />
 <input type="hidden" id="init-product-branding-url" value="%PRODUCT_BRANDING_URL%" />
 
 <input type="hidden" id="init-uri-prefix" value="m4_ifelse(MOBILEAPP, [], [%SERVICE_ROOT%/browser/%VERSION%/])" />
@@ -90,6 +90,19 @@ m4_ifelse(MOBILEAPP,[true],
    <link rel="localizations" href="%SERVICE_ROOT%/browser/%VERSION%/l10n/help-localizations.json" type="application/vnd.oftn.l10n+json"/>
    <link rel="localizations" href="%SERVICE_ROOT%/browser/%VERSION%/l10n/uno-localizations.json" type="application/vnd.oftn.l10n+json"/>]
 )m4_dnl
+
+<script>
+// 监听标题变化并重置为"文件预览"
+const originalTitle = "文件预览";
+new MutationObserver(() => {
+    if (document.title !== originalTitle) {
+        document.title = originalTitle;
+    }
+}).observe(
+    document.querySelector('title'),
+    { subtree: true, characterData: true, childList: true }
+);
+</script>
 </head>
 
   <body>
