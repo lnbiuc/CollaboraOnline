@@ -29,11 +29,11 @@ L.ProgressOverlay = L.Layer.extend({
 		// } else {
 		// 	productName = (typeof brandProductName !== 'undefined') ? brandProductName : '';
 		// }
-		this._brandLabel = L.DomUtil.create('div', 'leaflet-progress-label brand-label', this._container);
-		this._brandLabel.innerHTML = '';
+		// this._brandLabel = L.DomUtil.create('div', 'leaflet-progress-label brand-label', this._container);
+		// this._brandLabel.innerHTML = '';
 
 
-		this._label = L.DomUtil.create('div', 'leaflet-progress-label', this._container);
+		// this._label = L.DomUtil.create('div', 'leaflet-progress-label', this._container);
 		this._progress = L.DomUtil.create('div', 'leaflet-progress', this._container);
 		this._bar = L.DomUtil.create('span', '', this._progress);
 		this._value = L.DomUtil.create('span', '', this._bar);
@@ -105,9 +105,9 @@ L.ProgressOverlay = L.Layer.extend({
 	},
 
 	setLabel: function (label) {
-		if (this._container && this._label.innerHTML !== label) {
-			this._label.innerHTML = label;
-		}
+		// if (this._container && this._label.innerHTML !== label) {
+		// 	this._label.innerHTML = label;
+		// }
 	},
 
 	setBar: function (bar) {
