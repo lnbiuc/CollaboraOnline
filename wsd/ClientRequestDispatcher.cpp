@@ -378,21 +378,24 @@ getConvertToBrokerImplementation(const std::string& requestType, const std::stri
     if (requestType == "convert-to")
         return std::make_shared<ConvertToBroker>(fromPath, uriPublic, docKey, format, options,
                                                  lang);
-    else if (requestType == "extract-link-targets")
+
+    if (requestType == "extract-link-targets")
         return std::make_shared<ExtractLinkTargetsBroker>(fromPath, uriPublic, docKey, lang);
-    else if (requestType == "extract-document-structure")
+
+    if (requestType == "extract-document-structure")
         return std::make_shared<ExtractDocumentStructureBroker>(fromPath, uriPublic, docKey, lang,
                                                                 filter);
-    else if (requestType == "transform-document-structure")
+    if (requestType == "transform-document-structure")
     {
         if (format.empty())
-            return std::make_shared<TransformDocumentStructureBroker>(fromPath, uriPublic, docKey,
-                Poco::Path(fromPath).getExtension(), lang, transformJSON);
-        else
-            return std::make_shared<TransformDocumentStructureBroker>(fromPath, uriPublic, docKey,
-                format, lang, transformJSON);
+            return std::make_shared<TransformDocumentStructureBroker>(
+                fromPath, uriPublic, docKey, Poco::Path(fromPath).getExtension(), lang,
+                transformJSON);
+        return std::make_shared<TransformDocumentStructureBroker>(fromPath, uriPublic, docKey,
+                                                                  format, lang, transformJSON);
     }
-    else if (requestType == "get-thumbnail")
+
+    if (requestType == "get-thumbnail")
         return std::make_shared<GetThumbnailBroker>(fromPath, uriPublic, docKey, lang, target);
 
     return nullptr;
@@ -485,7 +488,7 @@ public:
         };
 
         const std::string& addressToCheck = _addressesToResolve.front();
-        net::AsyncDNS::lookup(addressToCheck, {}, pushHostnameResolvedToPoll, dumpState);
+        net::AsyncDNS::lookup(addressToCheck, pushHostnameResolvedToPoll, dumpState);
     }
 
     void hostnameResolved(const net::HostEntry& hostEntry)
@@ -783,12 +786,14 @@ void ClientRequestDispatcher::handleIncomingMessage(SocketDisposition& dispositi
                     }
                 }
 #endif
+                if (!servedSync)
+                    HttpHelper::sendErrorAndShutdown(http::StatusCode::BadRequest, socket);
             }
             else
             {
                 FileServerRequestHandler::ResourceAccessDetails accessDetails;
-                COOLWSD::FileRequestHandler->handleRequest(request, requestDetails, message, socket,
-                                                           accessDetails);
+                servedSync = COOLWSD::FileRequestHandler->handleRequest(
+                    request, requestDetails, message, socket, accessDetails);
                 if (accessDetails.isValid())
                 {
                     LOG_ASSERT_MSG(
@@ -799,11 +804,7 @@ void ClientRequestDispatcher::handleIncomingMessage(SocketDisposition& dispositi
                     launchAsyncCheckFileInfo(_id, accessDetails, RequestVettingStations,
                                              RvsHighWatermark);
                 }
-                servedSync = true;
             }
-
-            if (!servedSync)
-                HttpHelper::sendErrorAndShutdown(http::StatusCode::BadRequest, socket);
         }
         else if (requestDetails.equals(RequestDetails::Field::Type, "cool") &&
                  requestDetails.equals(1, "adminws"))
@@ -936,7 +937,7 @@ void ClientRequestDispatcher::handleIncomingMessage(SocketDisposition& dispositi
         }
         else
         {
-            LOG_ERR("Unknown resource: " << requestDetails.toString());
+            LOG_WRN("Unknown resource: " << requestDetails.toString());
 
             // Bad request.
             HttpHelper::sendErrorAndShutdown(http::StatusCode::BadRequest, socket);
@@ -979,7 +980,8 @@ void ClientRequestDispatcher::handleIncomingMessage(SocketDisposition& dispositi
             socket->eraseFirstInputBytes(map._messageSize - map._headerSize);
         }
     }
-    if( servedSync && closeConnection && !socket->isClosed() )
+
+    if (servedSync && closeConnection && !socket->isShutdown())
     {
         LOG_DBG("Handled request: " << request.getURI()
                 << ", inBuf[sz " << preInBufferSz << " -> " << socket->getInBuffer().size()
@@ -992,7 +994,7 @@ void ClientRequestDispatcher::handleIncomingMessage(SocketDisposition& dispositi
         LOG_DBG("Handled request: " << request.getURI()
                 << ", inBuf[sz " << preInBufferSz << " -> " << socket->getInBuffer().size()
                 << ", rm " <<  (preInBufferSz-socket->getInBuffer().size())
-                << "], connection open " << !socket->isClosed());
+                << "], connection open " << !socket->isShutdown());
 
 #else // !MOBILEAPP
     Poco::Net::HTTPRequest request;
@@ -1120,6 +1122,8 @@ STATE_ENUM(CheckStatus,
     UnspecifiedError,
     ConnectionAborted,
     CertificateValidation,
+    SelfSignedCertificate,
+    ExpiredCertificate,
     SslHandshakeFail,
     MissingSsl,
     NotHttps,
@@ -1219,7 +1223,7 @@ bool ClientRequestDispatcher::handleWopiAccessCheckRequest(const Poco::Net::HTTP
         jsonResponse.set("X-Content-Type-Options", "nosniff");
 
         socket->sendAndShutdown(jsonResponse);
-        LOG_INF("Wopi Access Check request, result" << nameShort(result));
+        LOG_INF("Wopi Access Check request, result: " << nameShort(result));
     };
 
     if (scheme.empty())
@@ -1278,16 +1282,24 @@ bool ClientRequestDispatcher::handleWopiAccessCheckRequest(const Poco::Net::HTTP
                 status = CheckStatus::HostNotFound;
             }
 
+#if ENABLE_SSL
             if (result == net::AsyncConnectResult::SSLHandShakeFailure) {
                 status = CheckStatus::SslHandshakeFail;
             }
 
-            if (!probeSession->getSslVerifyMessage().empty())
+            auto sslResult = probeSession->getSslVerifyResult();
+            if (sslResult != X509_V_OK)
             {
-                status = CheckStatus::CertificateValidation;
-
-                LOG_DBG("Result ssl: " << probeSession->getSslVerifyMessage());
+                if (sslResult == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT) {
+                    status = CheckStatus::SelfSignedCertificate;
+                } else if (sslResult == X509_V_ERR_CERT_HAS_EXPIRED) {
+                    status = CheckStatus::ExpiredCertificate;
+                } else {
+                    status = CheckStatus::CertificateValidation;
+                    LOG_DBG("Result ssl: " << probeSession->getSslVerifyMessage());
+                }
             }
+#endif
 
             sendResult(status);
     });
@@ -1322,23 +1334,22 @@ bool ClientRequestDispatcher::handleWopiAccessCheckRequest(const Poco::Net::HTTP
         if (result == net::AsyncConnectResult::UnknownHostError)
             status = CheckStatus::HostNotFound;
 
-        if (protocol == http::Session::Protocol::HttpSsl && lastErrno == ENOTCONN)
-            status = CheckStatus::MissingSsl;
-
         if (result == net::AsyncConnectResult::ConnectionError)
             status = CheckStatus::ConnectionAborted;
 
-        // TODO complete error coverage
-        // certificate errors
-        // self-signed
-        // expired
-
-        if (!probeSession->getSslVerifyMessage().empty())
+#if ENABLE_SSL
+        auto sslResult = probeSession->getSslVerifyResult();
+        if (sslResult != X509_V_OK)
         {
-            status = CheckStatus::CertificateValidation;
-
-            LOG_DBG("Result ssl: " << probeSession->getSslVerifyMessage());
+            if (sslResult == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT) {
+                // means we aren't checking certificate or we'd have a connectionFail
+                status = CheckStatus::Ok;
+            } else {
+                status = CheckStatus::CertificateValidation;
+                LOG_WRN("Unexpected failed Result ssl in a connection success: " << probeSession->getSslVerifyMessage());
+            }
         }
+#endif
 
         sendResult(status);
     };
@@ -1907,7 +1918,8 @@ bool ClientRequestDispatcher::handlePostRequest(const RequestDetails& requestDet
         }
         return false;
     }
-    else if (requestDetails.equals(2, "insertfile"))
+
+    if (requestDetails.equals(2, "insertfile"))
     {
         LOG_INF("Insert file request.");
 
@@ -2310,6 +2322,11 @@ std::string ClientRequestDispatcher::getDiscoveryXML()
             elem->setAttribute(urlsrc, uriValue);
         }
 
+        if (parent && parent->getAttribute("name") == "Settings")
+        {
+            elem->setAttribute(urlsrc, uriBaseValue + SETTING_IFRAME_END_POINT);
+        }
+
         // Set the View extensions cache as well.
         if (elem->getAttribute("name") == "edit")
         {
@@ -2420,7 +2437,7 @@ static std::string getCapabilitiesJson(bool convertToAvailable)
     capabilities->set("hasProxyPrefix", COOLWSD::IsProxyPrefixEnabled);
 
     // Set if this instance supports Setting Iframe
-    capabilities->set("hasSettingIframeSupport", ConfigUtil::getBool("setting_iframe.enable", true));
+    capabilities->set("hasSettingIframeSupport", true);
 
     // Set if this instance supports Zotero
     capabilities->set("hasZoteroSupport", ConfigUtil::getBool("zotero.enable", true));

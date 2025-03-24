@@ -1,8 +1,22 @@
+/* -*- js-indent-level: 8 -*- */
+/*
+ * Copyright the Collabora Online contributors.
+ *
+ * SPDX-License-Identifier: MPL-2.0
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
+
 /// <reference path="./refs/globals.ts"/>
 /// <reference path="../src/core/geometry.ts" />
 /// <reference path="../src/geometry/Point.ts" />
 /// <reference path="../src/geometry/Bounds.ts" />
 /// <reference path="../src/app/TilesMiddleware.ts" />
+/// <reference path="../src/app/Rectangle.ts" />
+/// <reference path="../src/app/LOUtil.ts" />
+/// <reference path="../src/app/MultiPageViewLayout.ts" />
 /// <reference path="./helper/canvasContainerSetup.ts" />
 /// <reference path="./helper/rectUtil.ts" />
 
@@ -11,10 +25,9 @@ var assert = require('assert').strict;
 
 var dom = new jsdom.JSDOM(canvasDomString());
 
+addMockCanvas(dom.window);
 global.window = dom.window;
 global.document = dom.window.document;
-
-app.canvasSize = new cool.SimplePoint(0, 0);
 
 const canvasWidth = 1024;
 const canvasHeight = 768;

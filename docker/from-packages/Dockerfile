@@ -118,8 +118,14 @@ RUN --mount=type=secret,id=secret_key \
             apt-get -y install code-brand; \
         fi; \
     fi && \
+# Change cool uid/gid to 1001/1001
+    find /opt/cool -user cool -exec chown -h 1001:1001 {} \; && \
+    usermod -u 1001 cool && groupmod -g 1001 cool && \
+    chown cool:cool /etc/coolwsd/coolwsd.xml && \
 # Fix ownership of config directory that will be modified on start of the container by cool user
     chown cool:cool /etc/coolwsd && \
+# Remove packages which were only needed for installation (dependecies of curl, gnupg, fc-cache etc.)
+    dpkg --purge --ignore-depends=apt-transport-https,cpio,curl,dirmngr,fontconfig,fontconfig-config,fonts-dejavu-core,gnupg,gnupg-l10n,gnupg-utils,gnupg2,gpg,gpg-agent,gpg-wks-client,gpg-wks-server,gpgconf,gpgsm,krb5-locales,libassuan0,libbrotli1,libcap2-bin,libcurl4,libexpat1,libfontconfig1,libfreetype6,libgpm2,libksba8,libldap-2.5-0,libldap-common,libncursesw6,libnghttp2-14,libnpth0,libpng16-16,libpsl5,libreadline8,librtmp1,libsasl2-2,libsasl2-modules,libsasl2-modules-db,libsqlite3-0,libssh2-1,libssl3,openssl,pinentry-curses,publicsuffix,readline-common apt-transport-https cpio curl dirmngr fontconfig-config fonts-dejavu-core fontconfig gnupg gnupg-l10n gnupg-utils gnupg2 gpg gpg-agent gpg-wks-client gpg-wks-server gpgconf gpgsm krb5-locales libassuan0 libbrotli1 libcap2-bin libcurl4 libexpat1 libfontconfig1 libfreetype6 libgpm2 libksba8 libldap-2.5-0 libldap-common libncursesw6 libnghttp2-14 libnpth0 libpng16-16 libpsl5 libreadline8 librtmp1 libsasl2-2 libsasl2-modules libsasl2-modules-db libsqlite3-0 libssh2-1 libssl3 openssl pinentry-curses publicsuffix readline-common && \
 # Remove perl-base, it's not needed and triggered some license scanner because of Paul Hsieh derivative license
     dpkg --purge  --force-remove-essential --ignore-depends=perl-base perl-base && \
 # Cleanup
@@ -135,9 +141,8 @@ COPY /scripts/start-collabora-online.sh /
 EXPOSE 9980
 
 # Switch to cool user (use numeric user id to be compatible with Kubernetes Pod Security Policies)
-USER 100
+USER 1001
 
 # FIXME
 # Use the old starter script until we find out how to replace it.
 ENTRYPOINT ["/start-collabora-online.sh"]
-

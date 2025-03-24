@@ -103,7 +103,7 @@ ChildSession::ChildSession(const std::shared_ptr<ProtocolHandlerInterface>& prot
     , _currentPart(-1)
     , _isDocLoaded(false)
     , _copyToClipboard(false)
-    , _canonicalViewId(-1)
+    , _canonicalViewId(CanonicalViewId::Invalid)
     , _isDumpingTiles(false)
     , _clientVisibleArea(0, 0, 0, 0)
     , _URPContext(nullptr)
@@ -141,7 +141,7 @@ void ChildSession::disconnect()
     {
         if (_viewId >= 0)
         {
-            if (_docManager)
+            if (_docManager != nullptr)
             {
                 _docManager->onUnload(*this);
 
@@ -722,10 +722,11 @@ bool ChildSession::_handleInput(const char *buffer, int length)
                     LogUiCommands uiLog(this);
                     uiLog.logSaveLoad("save", Poco::URI(getJailedFilePath()).getPath(), timeStart);
                 }
+
                 return result;
             }
-            else
-                return true;
+
+            return true;
         }
         else if (tokens.equals(0, "selecttext"))
         {
@@ -1275,39 +1276,34 @@ bool ChildSession::clientVisibleArea(const StringVector& tokens)
     return true;
 }
 
-float ChildSession::getTilePriority(const std::chrono::steady_clock::time_point &now, const TileDesc &tile) const
+TilePrioritizer::Priority ChildSession::getTilePriority(const TileDesc &tile) const
 {
-    float score = tile.intersects(_clientVisibleArea) ? 2.0 : 1.0;
+    // previews are least interesting
+    if (tile.isPreview())
+        return TilePrioritizer::Priority::LOWEST;
+
+    // different part less interesting than session's current part
+    if (tile.getPart() != _currentPart)
+        return TilePrioritizer::Priority::LOW;
 
     // most important to render things close to the cursor fast
-    if (tile.getPart() == _currentPart)
-    {
-        if (tile.intersects(_cursorPosition))
-            score *= 2.0;
+    if (tile.intersects(_cursorPosition))
+        return TilePrioritizer::Priority::ULTRAHIGH;
 
-        // interacted with the keyboard/mouse recently ?
-        if (getInactivityMS(now) < 200 /* ms */) // typing etc.
-            score *= 2.0;
+    // inside viewing area more important than outside it
+    if (tile.intersects(_clientVisibleArea))
+        return TilePrioritizer::Priority::VERYHIGH;
 
-        // pre-loading near the viewing area is also more important than far away
-        Util::Rectangle r = tile.toAABBox();
-        // grow in each direction
-        Util::Rectangle enlarged =
-            Util::Rectangle::create(r.getLeft() - r.getWidth(), r.getTop() - r.getHeight(),
-                                    r.getRight() + r.getWidth(), r.getBottom() + r.getHeight());
-        if (enlarged.intersects(_clientVisibleArea))
-            score *= 2.0;
-    }
+    // pre-loading near the viewing area is also more important than far away
+    Util::Rectangle r = tile.toAABBox();
+    // grow in each direction
+    Util::Rectangle enlarged =
+        Util::Rectangle::create(r.getLeft() - r.getWidth(), r.getTop() - r.getHeight(),
+                                r.getRight() + r.getWidth(), r.getBottom() + r.getHeight());
+    if (enlarged.intersects(_clientVisibleArea))
+        return TilePrioritizer::Priority::HIGH;
 
-    // previews are less interesting
-    if (tile.isPreview())
-        score /= 2.0;
-
-    // readonly viewers are also less high priority
-    else if (isReadOnly())
-        score /= 2;
-
-    return score;
+    return TilePrioritizer::Priority::NORMAL;
 }
 
 bool ChildSession::outlineState(const StringVector& tokens)
@@ -3372,12 +3368,14 @@ void ChildSession::loKitCallback(const int type, const std::string& payload)
         LOG_TRC("Skipping callback [" << typeName << "] on closing session " << getName());
         return;
     }
-    else if (isDisconnected())
+
+    if (isDisconnected())
     {
         LOG_TRC("Skipping callback [" << typeName << "] on disconnected session " << getName());
         return;
     }
-    else if (!isActive())
+
+    if (!isActive())
     {
         rememberEventsForInactiveUser(type, payload);
 

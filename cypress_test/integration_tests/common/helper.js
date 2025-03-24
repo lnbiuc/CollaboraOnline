@@ -362,7 +362,7 @@ function documentChecks(skipInitializedCheck = false) {
 		doIfOnDesktop(function() {
 			var showSidebar = localStorage.getItem('text.ShowSidebar');
 			if (Cypress.env('pdf-view') !== true && showSidebar !== 'false')
-				cy.cframe().find('#sidebar-panel').should('be.visible');
+				cy.cframe().find('#sidebar-panel').should('be.visible').should('not.be.empty');
 
 			// Check that the document does not take the whole window width.
 			cy.window()
@@ -1074,16 +1074,10 @@ function typeIntoInputField(selector, text, clearBefore = true)
 {
 	cy.log('>> typeIntoInputField - start');
 
-	cy.cGet(selector).as('input');
-	cy.get('@input').focus();
-	cy.get('@input').should('have.focus');
-	if (clearBefore) {
-		cy.get('@input').invoke('val', '');
-		cy.get('@input').should('have.value', '');
-	}
-
-	cy.get('@input').type(text + '{enter}');
-	cy.get('@input').should('have.value', text);
+	cy.wait(600);
+	cy.cGet(selector).type((clearBefore ? '{selectall}{backspace}' : '') + text + '{enter}');
+	cy.wait(600);
+	cy.cGet(selector).should('have.value', text);
 
 	cy.log('<< typeIntoInputField - end');
 }

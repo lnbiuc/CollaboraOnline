@@ -83,7 +83,6 @@ public:
     static std::string FileServerRoot;
     static std::string ServiceRoot; ///< There are installations that need prefixing every page with some path.
     static std::string TmpFontDir;
-    static std::string TmpPresntTemplateDir;
     static std::string LOKitVersion;
     static bool EnableTraceEventLogging;
     static bool EnableAccessibility;
@@ -219,7 +218,7 @@ public:
     /// child kit processes and cleans up DocBrokers.
     static void doHousekeeping();
 
-    static void checkDiskSpaceAndWarnClients(const bool cacheLastCheck);
+    static void checkDiskSpaceAndWarnClients(bool cacheLastCheck);
 
     static void checkSessionLimitsAndWarnClients();
 
@@ -249,8 +248,7 @@ public:
     static void setMigrationMsgReceived(const std::string& docKey);
     static void setAllMigrationMsgReceived();
 #if !MOBILEAPP
-    static void syncUsersBrowserSettings(const std::string& userId, const std::string& key,
-                                             const std::string& value);
+    static void syncUsersBrowserSettings(const std::string& userId, const pid_t childPid, const std::string& json);
 #endif
 
 #if ENABLE_DEBUG
@@ -284,12 +282,12 @@ protected:
     int main(const std::vector<std::string>& args) override;
 
     /// Handle various global static destructors.
-    static void cleanup();
+    static void cleanup(int returnValue);
 
 private:
 #if !MOBILEAPP
     void processFetchUpdate(SocketPoll& poll);
-    static void setupChildRoot(const bool UseMountNamespaces);
+    static void setupChildRoot(bool UseMountNamespaces);
     void initializeEnvOptions();
 #endif // !MOBILEAPP
 

@@ -11,6 +11,8 @@ window.app = {
 	console: {}
 };
 
+// For typings (including the global object), please see browser/src/global.d.ts
+
 // This function may look unused, but it's needed in WASM and Android to send data through the fake websocket. Please
 // don't remove it without first grepping for 'Base64ToArrayBuffer' in the C++ code
 // eslint-disable-next-line
@@ -223,8 +225,11 @@ class InitializerBase {
 		if (initCSSVars) {
 			initCSSVars = atob(initCSSVars);
 			const sheet = new CSSStyleSheet();
-			sheet.replace(initCSSVars);
-			document.adoptedStyleSheets.push(sheet);
+			if (typeof sheet.replace === 'function')
+			{
+				sheet.replace(initCSSVars);
+				document.adoptedStyleSheets.push(sheet);
+			} // else jsdom
 		}
 
 		const element = document.getElementById("initial-variables");
@@ -387,6 +392,7 @@ class BrowserInitializer extends InitializerBase {
 		window.enableAccessibility = element.dataset.enableAccessibility.toLowerCase().trim() === "true";
 		window.outOfFocusTimeoutSecs = parseInt(element.dataset.outOfFocusTimeoutSecs);
 		window.idleTimeoutSecs = parseInt(element.dataset.idleTimeoutSecs);
+		window.minSavedMessageTimeoutSecs = parseInt(element.dataset.minSavedMessageTimeoutSecs);
 		window.protocolDebug = element.dataset.protocolDebug.toLowerCase().trim() === "true";
 		window.enableDebug = element.dataset.enableDebug.toLowerCase().trim() === "true";
 		window.frameAncestors = decodeURIComponent(element.dataset.frameAncestors);
@@ -442,6 +448,8 @@ class MobileAppInitializer extends InitializerBase {
 		window.coolLogging = "true";
 		window.outOfFocusTimeoutSecs = 1000000;
 		window.idleTimeoutSecs = 1000000;
+
+		window.canvasSlideshowEnabled = true;
 	}
 }
 
@@ -714,8 +722,11 @@ function getInitializerClass() {
 				let val = defaultValue;
 				if (Object.prototype.hasOwnProperty.call(global.prefs._userBrowserSetting, key))
 					val = global.prefs._userBrowserSetting[key];
-				global.prefs._localStorageCache[key] = val;
-				return val;
+
+				if(val !== undefined) {
+					global.prefs._localStorageCache[key] = val;
+					return val;
+				}
 			}
 
 			if (global.prefs.canPersist) {
@@ -736,12 +747,39 @@ function getInitializerClass() {
 			return defaultValue;
 		},
 
+		// set multiple preference together and when browsersetting is enabled send
+		// update only once
+		setMultiple: function (prefsObject) {
+			const settingUpdateJSON = {};
+			const browserSettingEnabled = global.prefs.useBrowserSetting;
+			for (const [key, value] of Object.entries(prefsObject)) {
+				if (browserSettingEnabled) {
+					const oldValue = global.prefs._userBrowserSetting[key];
+					global.prefs._userBrowserSetting[key] = value;
+					if (oldValue !== value)
+						settingUpdateJSON[key] = value;
+				}
+				if (global.prefs.canPersist) {
+					global.localStorage.setItem(key, value);
+				}
+				global.prefs._localStorageCache[key] = value;
+			}
+
+			const isEmpty = (obj) => Object.keys(obj).length === 0;
+			if (browserSettingEnabled && !isEmpty(settingUpdateJSON) && global.socket && (global.socket instanceof WebSocket) && global.socket.readyState === 1)
+				global.socket.send('browsersetting action=update json=' + JSON.stringify(settingUpdateJSON));
+		},
+
 		set: function(key, value) {
 			value = String(value); // NOT "new String(...)". We cannot use .toString here because value could be null/undefined
 			if (global.prefs.useBrowserSetting) {
+				const oldValue = global.prefs._userBrowserSetting[key];
 				global.prefs._userBrowserSetting[key] = value;
-				if (global.socket && (global.socket instanceof WebSocket) && global.socket.readyState === 1)
-					global.socket.send('browsersetting action=update key=' + key + ' value=' + value);
+				if (global.socket && (global.socket instanceof WebSocket) && global.socket.readyState === 1 && oldValue !== value) {
+					const tmpObject = {};
+					tmpObject[key] = value;
+					global.socket.send('browsersetting action=update json=' + JSON.stringify(tmpObject));
+				}
 			}
 			if (global.prefs.canPersist) {
 				global.localStorage.setItem(key, value);

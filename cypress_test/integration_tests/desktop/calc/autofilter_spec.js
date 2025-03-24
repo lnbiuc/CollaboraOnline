@@ -20,11 +20,11 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'AutoFilter Complex', funct
 		helper.typeIntoInputField(helper.addressInputSelector, 'A1');
 		cy.wait(1000);
 
-		helper.typeIntoInputField(helper.addressInputSelector, 'U125');
+		helper.typeIntoInputField(helper.addressInputSelector, 'U126');
 		cy.cGet('#map').focus();
 		cy.wait(1000);
 
-		desktopHelper.assertScrollbarPosition('vertical', 240, 260);
+		desktopHelper.assertScrollbarPosition('vertical', 250, 270);
 		desktopHelper.assertScrollbarPosition('horizontal', 210, 230);
 	});
 
@@ -38,7 +38,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'AutoFilter Complex', funct
 		cy.cGet('.autofilter .ui-treeview-expander-column').eq(1).click(); // open January
 
 		cy.cGet('#toggle_all-input').should('not.be.checked');
-		cy.cGet('.autofilter input[type="checkbox"]').eq(3).should('not.be.checked');
+		cy.cGet('.autofilter input[type="checkbox"]').eq(4).should('not.be.checked');
 	});
 });
 
@@ -120,7 +120,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'AutoFilter', function() {
 		calcHelper.dblClickOnFirstCell();
 		helper.typeIntoDocument('New content{enter}');
 
-		calcHelper.assertSheetContents(['CNew contentypress Test', 'Status', 'Test 1', 'Pass', 'Test 2', 'Fail', 'Test 3', 'Pass', 'Test 4', '', 'Test 5', 'Fail'], true);
+		calcHelper.assertSheetContents(['New contentCypress Test', 'Status', 'Test 1', 'Pass', 'Test 2', 'Fail', 'Test 3', 'Pass', 'Test 4', '', 'Test 5', 'Fail'], true);
 	});
 
 	// check if filter by color applied or not

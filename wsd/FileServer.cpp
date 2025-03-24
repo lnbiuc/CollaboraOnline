@@ -149,7 +149,7 @@ bool isPamAuthOk(const std::string& userProvidedUsr, const std::string& userProv
 bool isConfigAuthOk(const std::string& userProvidedUsr, const std::string& userProvidedPwd)
 {
     const auto& config = Application::instance().config();
-    const std::string& user = config.getString("admin_console.username", "");
+    const std::string& user = config.getString("admin_console.username", std::string());
 
     // Check for the username
     if (user.empty())
@@ -157,7 +157,8 @@ bool isConfigAuthOk(const std::string& userProvidedUsr, const std::string& userP
         LOG_ERR("Admin Console username missing, admin console disabled.");
         return false;
     }
-    else if (user != userProvidedUsr)
+
+    if (user != userProvidedUsr)
     {
         LOG_ERR("Admin Console wrong username.");
         return false;
@@ -168,7 +169,8 @@ bool isConfigAuthOk(const std::string& userProvidedUsr, const std::string& userP
     // do we have secure_password?
     if (config.has("admin_console.secure_password"))
     {
-        const std::string securePass = config.getString("admin_console.secure_password", "");
+        const std::string securePass =
+            config.getString("admin_console.secure_password", std::string());
         if (securePass.empty())
         {
             LOG_ERR("Admin Console secure password is empty, denying access." << useCoolconfig);
@@ -227,11 +229,34 @@ FileServerRequestHandler::FileServerRequestHandler(const std::string& root)
     try
     {
         readDirToHash(root, "/browser/dist");
+
+        // Shrink this from approx 200M to 50M for debug version
+        for (auto& entry : FileHash)
+        {
+            entry.second.first.shrink_to_fit();
+            entry.second.second.shrink_to_fit();
+        }
     }
     catch (...)
     {
         LOG_ERR("Failed to read from directory " << root);
     }
+}
+
+//static
+void FileServerRequestHandler::dumpState(std::ostream& os)
+{
+    os << "FileHash with " << FileHash.size() << " entries\n";
+
+    size_t fileHashEstSize = sizeof(FileHash);
+    for (const auto& entry : FileHash)
+    {
+        fileHashEstSize += entry.first.capacity();
+        fileHashEstSize += entry.second.first.capacity();
+        fileHashEstSize += entry.second.second.capacity();
+    }
+
+    os << "\t Estimated allocation size: " << fileHashEstSize << " bytes\n";
 }
 
 FileServerRequestHandler::~FileServerRequestHandler()
@@ -501,7 +526,8 @@ bool FileServerRequestHandler::isAdminLoggedIn(const HTTPRequest& request, http:
 
             return;
         }
-        else if(request.getMethod() == "GET" && path.toString().ends_with(suffix))
+
+        if (request.getMethod() == "GET" && path.toString().ends_with(suffix))
         {
             const std::shared_ptr<LocalFileInfo>& localFile =
                 LocalFileInfo::getOrCreateFile(localPath, path.getFileName());
@@ -516,7 +542,8 @@ bool FileServerRequestHandler::isAdminLoggedIn(const HTTPRequest& request, http:
             socket->send(httpResponse);
             return;
         }
-        else if (request.getMethod() == "POST" && path.toString().ends_with(suffix))
+
+        if (request.getMethod() == "POST" && path.toString().ends_with(suffix))
         {
             const std::shared_ptr<LocalFileInfo>& localFile =
                 LocalFileInfo::getOrCreateFile(localPath, path.getFileName());
@@ -848,7 +875,7 @@ bool FileServerRequestHandler::isAdminLoggedIn(const HTTPRequest& request, http:
 
 #endif
 
-void FileServerRequestHandler::handleRequest(const HTTPRequest& request,
+bool FileServerRequestHandler::handleRequest(const HTTPRequest& request,
                                              const RequestDetails& requestDetails,
                                              Poco::MemoryInputStream& message,
                                              const std::shared_ptr<StreamSocket>& socket,
@@ -894,15 +921,16 @@ void FileServerRequestHandler::handleRequest(const HTTPRequest& request,
         // handle here:
 
 #if ENABLE_DEBUG
-        if (relPath.starts_with("/wopi/files")) {
+        if (relPath.starts_with("/wopi/files"))
+        {
             handleWopiRequest(request, requestDetails, message, socket);
-            return;
+            return true;
         }
-        else if (relPath.starts_with("/wopi/settings") ||
-                 relPath.ends_with("/wopi/settings/upload"))
+
+        if (relPath.starts_with("/wopi/settings") || relPath.ends_with("/wopi/settings/upload"))
         {
             handleSettingsRequest(request, etagString, message, socket);
-            return;
+            return true;
         }
 
 #endif
@@ -924,7 +952,7 @@ void FileServerRequestHandler::handleRequest(const HTTPRequest& request,
                     http::Response httpResponse(http::StatusCode::OK);
                     FileServerRequestHandler::hstsHeaders(httpResponse);
                     socket->send(httpResponse);
-                    return;
+                    return true;
                 }
             }
         }
@@ -933,25 +961,25 @@ void FileServerRequestHandler::handleRequest(const HTTPRequest& request,
         {
             LOG_INF("Processing upload-settings request.");
             uploadFileToIntegrator(request, message, socket);
-            return;
+            return false;
         }
 
         if (endPoint == "fetch-settings-config")
         {
             fetchWopiSettingConfigs(request, message, socket);
-            return;
+            return false;
         }
 
         if (endPoint == "delete-settings-config")
         {
             deleteWopiSettingConfigs(request, message, socket);
-            return;
+            return false;
         }
 
         if (endPoint == "fetch-wordbook")
         {
             fetchWordbook(request, message, socket);
-            return;
+            return true;
         }
 
         // Is this a file we read at startup - if not; it's not for serving.
@@ -965,7 +993,7 @@ void FileServerRequestHandler::handleRequest(const HTTPRequest& request,
         if (endPoint == "welcome.html")
         {
             preprocessWelcomeFile(request, response, requestDetails, message, socket);
-            return;
+            return true;
         }
 
         if (endPoint == "cool.html" ||
@@ -976,13 +1004,13 @@ void FileServerRequestHandler::handleRequest(const HTTPRequest& request,
             endPoint == "uno-localizations-override.json")
         {
             accessDetails = preprocessFile(request, response, requestDetails, message, socket);
-            return;
+            return true;
         }
 
         if (endPoint == "adminIntegratorSettings.html")
         {
             preprocessIntegratorAdminFile(request, response, requestDetails, message, socket);
-            return;
+            return true;
         }
 
         if (request.getMethod() == HTTPRequest::HTTP_GET)
@@ -993,7 +1021,7 @@ void FileServerRequestHandler::handleRequest(const HTTPRequest& request,
                 endPoint == "adminClusterOverviewAbout.html")
             {
                 preprocessAdminFile(request, response, requestDetails, socket);
-                return;
+                return true;
             }
 
             if (endPoint == "admin-bundle.js" ||
@@ -1053,7 +1081,7 @@ void FileServerRequestHandler::handleRequest(const HTTPRequest& request,
                         "Cache-Control: max-age=11059200\r\n";
                     HttpHelper::sendErrorAndShutdown(http::StatusCode::NotModified, socket,
                                                      std::string(), extraHeaders);
-                    return;
+                    return true;
                 }
             }
 
@@ -1082,7 +1110,7 @@ void FileServerRequestHandler::handleRequest(const HTTPRequest& request,
                 }
 
                 HttpHelper::sendFile(socket, filePath, response, noCache);
-                return;
+                return true;
             }
 #endif
 
@@ -1145,6 +1173,7 @@ void FileServerRequestHandler::handleRequest(const HTTPRequest& request,
                   "500 - Internal Server Error!",
                   "Cannot process the request - " + exc.displayText());
     }
+    return true;
 }
 
 void FileServerRequestHandler::sendError(http::StatusCode errorCode,
@@ -2106,7 +2135,7 @@ void FileServerRequestHandler::fetchWopiSettingConfigs(const Poco::Net::HTTPRequ
 
         clientResponse.setBody(httpResponse->getBody());
 
-        socket->send(clientResponse);
+        socket->sendAndShutdown(clientResponse);
         LOG_DBG("Successfully fetched wopi settings config from wopiHost[" << uriAnonym << ']');
     };
 
@@ -2222,7 +2251,7 @@ void FileServerRequestHandler::deleteWopiSettingConfigs(
 
         clientResponse.setBody(httpResponse->getBody());
 
-        socket->send(clientResponse);
+        socket->sendAndShutdown(clientResponse);
         LOG_DBG("Successfully deleted presetfile with fileId[" << fileId << "] from wopiHost["
                                                                << uriAnonym << ']');
     };
@@ -2300,7 +2329,7 @@ void FileServerRequestHandler::uploadFileToIntegrator(const Poco::Net::HTTPReque
         }
         http::Response httpResponseToClient(http::StatusCode::OK);
         httpResponseToClient.setBody("File uploaded successfully to WopiHost.");
-        socket->send(httpResponseToClient);
+        socket->sendAndShutdown(httpResponseToClient);
         LOG_TRC("Successfully uploaded presetfile[" << fileName << "] to wopiHost[" << uriAnonym
                                                     << ']');
     };
@@ -2393,7 +2422,7 @@ void FileServerRequestHandler::preprocessIntegratorAdminFile(const HTTPRequest& 
 
     response.setBody(std::move(adminFile));
     socket->send(response);
-    LOG_TRC("Sent file: " << relPath << ": " << adminFile);
+    LOG_TRC("Sent file: " << relPath << ": " << response.getBody());
 }
 
 

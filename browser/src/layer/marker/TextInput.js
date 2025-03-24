@@ -12,6 +12,9 @@
 
 L.TextInput = L.Layer.extend({
 	initialize: function() {
+
+		L.Layer.prototype.initialize.call(this);
+
 		this._className = 'TextInput';
 
 		// Flag to denote the composing state, derived from
@@ -481,7 +484,7 @@ L.TextInput = L.Layer.extend({
 	// Displays the caret and the under-caret marker.
 	// Fetches the coordinates of the caret from the map's doclayer.
 	showCursor: function() {
-		if (!this._map._docLayer._cursorMarker || !this._map._docLayer._tileWidthTwips) {
+		if (!this._map._docLayer._cursorMarker || app.tile.size.x === 0) {
 			return;
 		}
 

@@ -26,6 +26,10 @@ L.Path = L.Layer.extend({
 		fixed: false,
 	},
 
+	initialize: function () {
+		L.Layer.prototype.initialize.call(this);
+	},
+
 	onAdd: function () {
 		this._pathNodeCollection = new L.Path.PathNodeCollection();
 		this._renderer = this._map.getRenderer(this);
@@ -35,7 +39,10 @@ L.Path = L.Layer.extend({
 	},
 
 	onRemove: function () {
-		this._renderer._removePath(this);
+		if (this._renderer)
+			this._renderer._removePath(this);
+		else
+			console.debug('Path.onRemove: this._renderer missing');
 	},
 
 	getEvents: function () {

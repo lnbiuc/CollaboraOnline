@@ -270,7 +270,8 @@ private:
     static void reapZombieChildren();
 
     /// Calculate tile rendering priority from a TileDesc
-    virtual float getTilePriority(const std::chrono::steady_clock::time_point &now, const TileDesc &desc) const override;
+    virtual Priority getTilePriority(const TileDesc &desc) const override;
+    virtual std::vector<ViewIdInactivity> getViewIdsByInactivity() const override;
 
 public:
     /// Request loading a document, or a new view, if one exists,
@@ -296,6 +297,37 @@ public:
     DocumentPasswordType getDocPasswordType() const { return _docPasswordType; }
 
     void updateActivityHeader() const;
+
+    /// Really important that if we drop, we re-start for the kit.
+    class ThreadDropper final {
+        Document *_doc;
+    public:
+        ThreadDropper() : _doc(nullptr) { }
+        ~ThreadDropper()
+        {
+            if (_doc) _doc->startThreads();
+        }
+        void clear()
+        {
+            _doc = nullptr;
+        }
+        bool dropThreads(Document *doc)
+        {
+            if (doc->joinThreads())
+            {
+                // only this path starts later.
+                _doc = doc;
+                return true;
+            }
+            return false;
+        }
+        void startThreads()
+        {
+            if (_doc)
+                _doc->startThreads();
+            _doc = nullptr;
+        }
+    };
 
     bool joinThreads();
     void startThreads();
@@ -343,7 +375,7 @@ public:
     bool canRenderTiles() const {
         return processInputEnabled() && !isLoadOngoing() &&
             !isBackgroundSaveProcess() && _queue &&
-            _queue->getTileQueueSize() > 0;
+            !_queue->isTileQueueEmpty();
     }
     bool hasCallbacks() const { return _queue && _queue->callbackSize() > 0; }
 

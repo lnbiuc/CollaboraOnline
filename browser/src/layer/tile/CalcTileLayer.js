@@ -13,7 +13,7 @@
  * Calc tile layer is used to display a spreadsheet document
  */
 
-/* global app CPolyUtil CPolygon TileManager */
+/* global app CPolyUtil CPolygon TileManager cool */
 
 L.CalcTileLayer = L.CanvasTileLayer.extend({
 	options: {
@@ -51,7 +51,7 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 				anchorPos: app.calc.cellCursorRectangle.toArray(),
 				id: 'new',
 				tab: this._selectedPart,
-				dateTime: new Date().toDateString(),
+				dateTime: new Date().toISOString(),
 				author: this._map.getViewName(this._viewId)
 			};
 
@@ -173,8 +173,8 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 	_onZoomRowColumns: function () {
 		this._sendClientZoom();
 		if (this.sheetGeometry) {
-			this.sheetGeometry.setTileGeometryData(this._tileWidthTwips, this._tileHeightTwips,
-				this._tileSize);
+			this.sheetGeometry.setTileGeometryData(app.tile.size.x, app.tile.size.y,
+				TileManager.tileSize);
 		}
 		this._restrictDocumentSize();
 		this.setSplitPosFromCell();
@@ -190,8 +190,8 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		}
 
 		var maxDocSize = this.sheetGeometry.getSize('tiletwips');
-		var newDocWidth = Math.min(maxDocSize.x, this._docWidthTwips);
-		var newDocHeight = Math.min(maxDocSize.y, this._docHeightTwips);
+		var newDocWidth = Math.min(maxDocSize.x, app.file.size.x);
+		var newDocHeight = Math.min(maxDocSize.y, app.file.size.y);
 
 		var lastCellPixel = this.sheetGeometry.getCellRect(this._lastColumn, this._lastRow);
 		var isCalcRTL = this._map._docLayer.isCalcRTL();
@@ -222,18 +222,18 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 
 		var extendedLimit = false;
 
-		if (!limitWidth && maxDocSize.x > this._docWidthTwips) {
-			newDocWidth = Math.min(this._docWidthTwips + mapSizeTwips.x, maxDocSize.x);
+		if (!limitWidth && maxDocSize.x > app.file.size.x) {
+			newDocWidth = Math.min(app.file.size.x + mapSizeTwips.x, maxDocSize.x);
 			extendedLimit = true;
 		}
 
-		if (!limitHeight && maxDocSize.y > this._docHeightTwips) {
-			newDocHeight = Math.min(this._docHeightTwips + mapSizeTwips.y, maxDocSize.y);
+		if (!limitHeight && maxDocSize.y > app.file.size.y) {
+			newDocHeight = Math.min(app.file.size.y + mapSizeTwips.y, maxDocSize.y);
 			extendedLimit = true;
 		}
 
-		var shouldRestrict = (newDocWidth !== this._docWidthTwips ||
-				newDocHeight !== this._docHeightTwips);
+		var shouldRestrict = (newDocWidth !== app.file.size.x ||
+				newDocHeight !== app.file.size.y);
 
 		if (!shouldRestrict) {
 			return;
@@ -246,17 +246,16 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		var bottomRight = this._map.unproject(newSizePx);
 
 		this._docPixelSize = newSizePx.clone();
-		this._docWidthTwips = newDocWidth;
-		this._docHeightTwips = newDocHeight;
-		app.file.size.twips = [newDocWidth, newDocHeight];
-		app.file.size.pixels = [Math.round(this._tileSize * (this._docWidthTwips / this._tileWidthTwips)), Math.round(this._tileSize * (this._docHeightTwips / this._tileHeightTwips))];
-		app.view.size.pixels = app.file.size.pixels.slice();
+		app.file.size.x = newDocWidth;
+		app.file.size.y = newDocHeight;
+		app.file.size = new cool.SimplePoint(newDocWidth, newDocHeight);
+		app.view.size = app.file.size.clone();
 
 		this._map.setMaxBounds(new L.LatLngBounds(topLeft, bottomRight));
 
 		this._map.fire('scrolllimits', newSizePx.clone());
 
-		if (limitWidth || limitHeight || extendedLimit)
+		if (!this._syncTileContainerSize() && (limitWidth || limitHeight || extendedLimit))
 			app.sectionContainer.requestReDraw();
 	},
 
@@ -345,7 +344,7 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		let newMapSize = availableSpace.slice();
 		let newCanvasSize = documentContainerSize.slice();
 
-		const fileSizePixels = [app.file.size.pixels[0], app.file.size.pixels[1]];
+		const fileSizePixels = app.file.size.pToArray();
 
 		// If we don't need that much space.
 		if (fileSizePixels[0] < availableSpace[0]) {
@@ -382,9 +381,9 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 	},
 
 	_syncTileContainerSize: function() {
-		if (!this._map) return;
+		if (!this._map) return false;
 
-		if (!this._container) return;
+		if (!this._container) return false;
 
 		// Document container size is up to date as of now.
 		const documentContainerSize = this._getDocumentContainerSize();
@@ -402,6 +401,11 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 
 		const mapElement = document.getElementById('map'); // map's size = tiles section's size.
 		const oldMapSize = [mapElement.clientWidth, mapElement.clientHeight];
+
+		// Early exit. If there is no need to update the size, return here.
+		if (oldMapSize[0] === newMapSize[0] && oldMapSize[1] === newMapSize[1])
+			return false;
+
 		this._resizeMapElementAndTilesLayer(mapElement, marginLeft, marginTop, newMapSize);
 
 		app.sectionContainer.onResize(newCanvasSize[0], newCanvasSize[1]); // Canvas's size = documentContainer's size.
@@ -425,7 +429,10 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		if (heightIncreased || widthIncreased) {
 			app.sectionContainer.requestReDraw();
 			this._map.fire('sizeincreased');
+			return true;
 		}
+
+		return false;
 	},
 
 	_onStatusMsg: function (textMsg) {
@@ -442,12 +449,10 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 
 			if (statusJSON.readonly) this._map.setPermission('readonly');
 
-			this._docWidthTwips = statusJSON.width;
-			this._docHeightTwips = statusJSON.height;
+			app.file.size.x = statusJSON.width;
+			app.file.size.y = statusJSON.height;
 
-			app.file.size.twips = [this._docWidthTwips, this._docHeightTwips];
-			app.file.size.pixels = [Math.round(this._tileSize * (this._docWidthTwips / this._tileWidthTwips)), Math.round(this._tileSize * (this._docHeightTwips / this._tileHeightTwips))];
-			app.view.size.pixels = app.file.size.pixels.slice();
+			app.view.size = app.file.size.clone();
 
 			this._docType = statusJSON.type;
 			this._parts = statusJSON.partscount;
@@ -474,7 +479,7 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 			console.assert(this._viewId >= 0, 'Incorrect viewId received: ' + this._viewId);
 
 			var mapSize = this._map.getSize();
-			var sizePx = this._twipsToPixels(new L.Point(this._docWidthTwips, this._docHeightTwips));
+			var sizePx = this._twipsToPixels(new L.Point(app.file.size.x, app.file.size.y));
 			var width = sizePx.x;
 			var height = sizePx.y;
 
@@ -788,8 +793,8 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		if (!this.sheetGeometry) {
 			this._sheetGeomFirstWait = false;
 			this.sheetGeometry = new L.SheetGeometry(jsonMsgObj,
-				this._tileWidthTwips, this._tileHeightTwips,
-				this._tileSize, this._selectedPart);
+				app.tile.size.x, app.tile.size.y,
+				TileManager.tileSize, this._selectedPart);
 
 			app.sectionContainer.addSection(L.control.cornerHeader());
 			app.sectionContainer.addSection(new app.definitions.rowHeader());
@@ -1061,7 +1066,6 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 			textMsg = textMsg.replace('textselection:', '');
 			if (textMsg.trim() !== 'EMPTY' && textMsg.trim() !== '') {
 				this._cellSelections = textMsg.split(';');
-				var ratio = this._tileSize / this._tileWidthTwips;
 				var that = this;
 				this._cellSelections = this._cellSelections.map(function(element) {
 					element = element.split(',');
@@ -1070,7 +1074,7 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 					var bottomRightTwips = topLeftTwips.add(offset);
 					var boundsTwips = that._convertToTileTwipsSheetArea(new L.Bounds(topLeftTwips, bottomRightTwips));
 
-					element = app.LOUtil.createRectangle(boundsTwips.min.x * ratio, boundsTwips.min.y * ratio, boundsTwips.getSize().x * ratio, boundsTwips.getSize().y * ratio);
+					element = app.LOUtil.createRectangle(boundsTwips.min.x * app.twipsToPixels, boundsTwips.min.y * app.twipsToPixels, boundsTwips.getSize().x * app.twipsToPixels, boundsTwips.getSize().y * app.twipsToPixels);
 					return element;
 				});
 			}
@@ -1094,8 +1098,6 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 			if (!textMsg.match('EMPTY'))
 				this._highlightColAndRow(textMsg);
 		}
-		else
-			this._resetReferencesMarks();
 	},
 
 	updateHighlight: function () {
@@ -1105,7 +1107,7 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 				this._highlightColAndRow(updateMsg);
 			}
 			else
-				this._resetReferencesMarks();
+				this._resetReferencesMarks('focuscell');
 		}
 	},
 
@@ -1120,9 +1122,8 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		else
 			strTwips = textMsg.match(/\d+/g);
 
-		this._resetReferencesMarks();
+		this._resetReferencesMarks('focuscell');
 		var references = [];
-		this._referencesAll = [];
 		var rectangles = [];
 		var strColor = getComputedStyle(document.documentElement).getPropertyValue('--column-row-highlight');
 		var maxCol = 268435455;
@@ -1162,7 +1163,7 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 				weight: 2 * app.dpiScale,
 				opacity: 0.25});
 
-			references.push({mark: reference, part: part});
+			references.push({mark: reference, part: part, type: 'focuscell'});
 			this._referencesAll.push(references[i]);
 		}
 		this._updateReferenceMarks();
@@ -1255,7 +1256,7 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 			return this.sheetGeometry.getSize('corepixels');
 		}
 
-		return this._twipsToPixels(new L.Point(this._docWidthTwips, this._docHeightTwips));
+		return this._twipsToPixels(new L.Point(app.file.size.x, app.file.size.y));
 	},
 
 	_calculateScrollForNewCellCursor: function () {

@@ -29,7 +29,8 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 							'type': 'toolitem',
 							'text': _('Save'),
 							'command': '.uno:Save',
-							'accessKey': '1'
+							'accessKey': '1',
+							'isCustomTooltip': true
 						}
 					]
 				} : {}
@@ -346,19 +347,21 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 				]
 			});
 		}
-		content.push(
-			{
-				'type': 'container',
-				'children': [
-					{
-						'id': 'renamedocument',
-						'class': 'unoRenameDocument',
-						'type': 'bigcustomtoolitem',
-						'text': _('Rename'),
-					}
-				]
-			}
-		);
+		if (this._map['wopi']._supportsRename() && this._map['wopi'].UserCanRename) {
+			content.push(
+				{
+					'type': 'container',
+					'children': [
+						{
+							'id': 'renamedocument',
+							'class': 'unoRenameDocument',
+							'type': 'bigcustomtoolitem',
+							'text': _('Rename'),
+						}
+					]
+				}
+			);
+		}
 
 		return this.getTabPage('File', content);
 	},

@@ -420,7 +420,7 @@ class StatusBar extends JSDialog.Toolbar {
 		if (permissionContainer) {
 			while (permissionContainer.firstChild)
 				permissionContainer.removeChild(permissionContainer.firstChild);
-			permissionContainer.appendChild(getPermissionModeElements(isReadOnlyMode, canUserWrite));
+			permissionContainer.appendChild(getPermissionModeElements(isReadOnlyMode, canUserWrite, this.map));
 		}
 
 		this.builder.updateWidget(this.parentContainer, {
@@ -464,11 +464,12 @@ class StatusBar extends JSDialog.Toolbar {
 			this.updateHtmlItem('RowColSelCount', state ? state : _('Select multiple cells'), !state);
 		}
 		else if (commandName === '.uno:InsertMode') {
-			this.updateHtmlItem('InsertMode', state ? L.Styles.insertMode[state].toLocaleString() : _('Insert mode: inactive'), !state);
+			this.updateHtmlItem('InsertMode', state ? L.Styles.insertMode[state].toLocaleString() : ' ', !state);
 
 			$('#InsertMode').removeClass();
 			$('#InsertMode').addClass('jsdialog ui-badge insert-mode-' + state);
-			$('#insertmode-container').attr('default-state', state || null);
+			var isDefaultState = state === 'true' || state === '';
+			$('#insertmode-container').attr('default-state', isDefaultState || null);
 
 			if ((state === 'false' || !state) && app.definitions.urlPopUpSection.isOpen()) {
 				this.map.hyperlinkUnderCursor = null;

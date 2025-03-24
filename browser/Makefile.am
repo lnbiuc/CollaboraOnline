@@ -60,7 +60,7 @@ MOCHA_TS_JS_FILES = $(patsubst $(MOCHA_DIR)/%.ts,$(MOCHA_JS_DIR)/%.js,$(MOCHA_TS
 # tsc can report a failure, but still create a .js and a second make attempt will succeed,
 # so if this returns an error then delete the target
 $(MOCHA_JS_DIR)/%.js: $(MOCHA_DIR)/%.ts
-	$(QUIET_TSC) $(builddir)/node_modules/typescript/bin/tsc $< --outfile $@ --module none --lib dom,es2016 --target ES5 || (rm -f $@ && false)
+	$(QUIET_TSC) $(builddir)/node_modules/typescript/bin/tsc $< --outfile $@ --module none --lib dom,es2016 --target ES5 --downlevelIteration || (rm -f $@ && false)
 
 JQUERY_LIGHTNESS_IMAGE_PATH = $(srcdir)/images/jquery-ui-lightness
 JQUERY_LIGHTNESS_IMAGES = $(wildcard $(JQUERY_LIGHTNESS_IMAGE_PATH)/*.png)
@@ -238,9 +238,13 @@ COOL_JS_LST =\
 	src/docstatefunctions.js \
 	src/docdispatcher.ts \
 	src/app/DocEvents.ts \
+	src/core/geometry.ts \
 	src/app/GraphicSelectionMiddleware.ts \
+	src/app/MultiPageViewLayout.ts \
 	src/app/TilesMiddleware.ts \
 	src/app/SearchService.ts \
+	src/app/BaseClass.ts \
+	src/app/Events.ts \
 	src/app/Rectangle.ts \
 	src/app/Util.ts \
 	src/app/LOUtil.ts \
@@ -250,7 +254,6 @@ COOL_JS_LST =\
 	src/UNO/Key.js \
 	src/core/Log.js \
 	src/core/Util.js \
-	src/core/geometry.ts \
 	src/core/Class.js \
 	src/core/Events.js \
 	src/core/Socket.js \

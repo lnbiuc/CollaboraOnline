@@ -395,12 +395,15 @@ public:
     /// Set an HTTP header field, replacing an earlier value, if exists (case insensitive).
     void set(const std::string& key, std::string value)
     {
-        const Iterator e = _headers.end();
-        const Iterator it = std::find_if(_headers.begin(), e,
-                                    [&key](const Pair &pair) -> bool { return Util::iequal(pair.first, key); });
-        if( e != it ) {
+        const Iterator end = _headers.end();
+        const Iterator it = std::find_if(_headers.begin(), end, [&key](const Pair& pair) -> bool
+                                         { return Util::iequal(pair.first, key); });
+        if (it != end)
+        {
             it->second.swap(value);
-        } else {
+        }
+        else
+        {
             _headers.emplace_back(key, std::move(value));
         }
     }
@@ -408,21 +411,23 @@ public:
     // Returns true if the HTTP header field exists (case insensitive)
     bool has(const std::string& key) const
     {
-        const ConstIterator e = end();
-        return e != std::find_if(begin(), e,
-                            [&key](const Pair &pair) -> bool { return Util::iequal(pair.first, key); });
+        const ConstIterator end = this->end();
+        return std::find_if(begin(), end, [&key](const Pair& pair) -> bool
+                            { return Util::iequal(pair.first, key); }) != end;
     }
 
     /// Remove the first matching HTTP header field (case insensitive), returning true if found and removed.
     bool remove(const std::string& key)
     {
-        const ConstIterator e = end();
-        const ConstIterator it = std::find_if(begin(), e,
-                                    [&key](const Pair &pair) -> bool { return Util::iequal(pair.first, key); });
-        if( e != it ) {
+        const ConstIterator end = this->end();
+        const ConstIterator it = std::find_if(begin(), end, [&key](const Pair& pair) -> bool
+                                              { return Util::iequal(pair.first, key); });
+        if (it != end)
+        {
             _headers.erase(it);
             return true;
         }
+
         return false;
     }
 
@@ -432,14 +437,12 @@ public:
         // There are typically half a dozen header
         // entries, rarely much more. A map would
         // probably not be faster but would add complexity.
-        const ConstIterator e = end();
-        const ConstIterator it = std::find_if(begin(), e,
-                                    [&key](const Pair &pair) -> bool { return Util::iequal(pair.first, key); });
-        if( e != it ) {
+        const ConstIterator end = this->end();
+        const ConstIterator it = std::find_if(begin(), end, [&key](const Pair& pair) -> bool
+                                              { return Util::iequal(pair.first, key); });
+        if (it != end)
             return it->second;
-        } else {
-            return def;
-        }
+        return def;
     }
 
     /// Set the Content-Type header.
@@ -470,18 +473,18 @@ public:
         {
             return ConnectionToken::Close;
         }
-        else if (Util::iequal("keep-alive", token))
+
+        if (Util::iequal("keep-alive", token))
         {
             return ConnectionToken::KeepAlive;
         }
-        else if (Util::iequal("upgrade", token))
+
+        if (Util::iequal("upgrade", token))
         {
             return ConnectionToken::Upgrade;
         }
-        else
-        {
-            return ConnectionToken::None;
-        }
+
+        return ConnectionToken::None;
     }
     void setConnectionToken(ConnectionToken token)
     {
@@ -757,7 +760,7 @@ public:
         os << indent << "http::Request: " << _version << ' ' << _verb << ' ' << _url;
         os << indent << "\tstage: " << name(_stage);
         os << indent << "\theaders: ";
-        Util::joinPair(os, _header, (indent + '\t').c_str());
+        Util::joinPair(os, _header, indent + '\t');
     }
 
 private:
@@ -1065,7 +1068,7 @@ public:
         os << indent << "\theaders: ";
 
         std::string childIndent = indent + '\t';
-        Util::joinPair(os, _header, childIndent.c_str());
+        Util::joinPair(os, _header, childIndent);
         os << indent
            << Util::dumpHex(_body, "\tbody:\n", Util::replace(childIndent, "\n", "").c_str());
     }
@@ -1361,6 +1364,18 @@ public:
 #endif
     }
 
+    long getSslVerifyResult()
+    {
+#if ENABLE_SSL
+        std::shared_ptr<StreamSocket> socket = _socket.lock();
+        if (socket)
+            return socket->getSslVerifyResult();
+        return _handshakeSslVerifyFailure;
+#else
+        return 0; // X509_V_OK
+#endif
+    }
+
     std::string getSslCert(std::string& subjectHash)
     {
 #if ENABLE_SSL
@@ -1379,7 +1394,7 @@ public:
         std::shared_ptr<StreamSocket> socket = _socket.lock();
         if (socket)
         {
-            socket->closeConnection();
+            socket->shutdownConnection();
         }
     }
 
@@ -1680,7 +1695,7 @@ private:
         {
             LOG_TRC("onDisconnect");
             socket->shutdown(); // Flag for shutdown for housekeeping in SocketPoll.
-            socket->closeConnection(); // Immediately disconnect.
+            socket->shutdownConnection(); // Immediately disconnect.
             _socket.reset();
         }
 
@@ -1988,7 +2003,7 @@ public:
         LOG_TRC("disconnect");
         if (_socket)
         {
-            _socket->closeConnection();
+            _socket->shutdownConnection();
         }
     }
 
@@ -2140,7 +2155,7 @@ private:
             LOG_TRC("onDisconnect");
 
             _socket->shutdown(); // Flag for shutdown for housekeeping in SocketPoll.
-            _socket->closeConnection(); // Immediately disconnect.
+            _socket->shutdownConnection(); // Immediately disconnect.
             _socket.reset();
         }
 

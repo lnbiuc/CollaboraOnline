@@ -53,8 +53,7 @@ man_MANS = man/coolwsd.1 \
            man/coolmount.1
 
 
-dist_doc_DATA = wsd/README.md \
-                wsd/README.vars \
+dist_doc_DATA = wsd/README.vars \
                 wsd/protocol.txt \
                 wsd/metrics.txt \
                 THIRDPARTYLICENSES
@@ -573,11 +572,19 @@ else
   OUTPUT_TO_FILE=false
 endif
 
+QUIET_SAMPLES = $(QUIET_SAMPLES_$(V))
+QUIET_SAMPLES_ = $(QUIET_SAMPLES_$(AM_DEFAULT_VERBOSITY))
+QUIET_SAMPLES_0 = @echo "  SAMPLES " $@;
+
+QUIET_SBOM = $(QUIET_SBOM_$(V))
+QUIET_SBOM_ = $(QUIET_SBOM_$(AM_DEFAULT_VERBOSITY))
+QUIET_SBOM_0 = @echo "  SBOM    " $@;
+
 setup-wsd: all @JAILS_PATH@ @CACHE_PATH@ presets-dir
 	@echo "Launching coolwsd"
 	@fc-cache "@LO_PATH@"/share/fonts/truetype
 	@mkdir -p $(abs_top_builddir)/test/samples
-	@$(abs_top_srcdir)/scripts/build-samples.py $(abs_top_srcdir)/test/samples $(abs_top_srcdir)/test/samples
+	$(QUIET_SAMPLES) $(abs_top_srcdir)/scripts/build-samples.py $(abs_top_srcdir)/test/samples $(abs_top_srcdir)/test/samples
 	@echo
 
 COMMON_PARAMS = \
@@ -826,8 +833,22 @@ coverage-report:
 coverage-clean:
 	$(CLEANUP_COVERAGE)
 
+# a) -D/usr/include, don't care about system headers
+# b) -xProtocolHandlerInterface, this class poses a problem for pahole 1.29
+# (https://github.com/acmel/dwarves/issues/38 might be relevant)
+# c) Redirect stderr to /dev/null because there are a lot of dwarf parse
+# warnings: 'template_parameter_pack__load_params: DW_TAG_template_value_parameter'
+# possibly related to https://gcc.gnu.org/wiki/TemplateParmsDwarf
+check-struct-packing:
+	@echo Note: results only reliable with clang++ and CXXFLAGS=-fno-eliminate-unused-debug-types
+	@if pahole -D/usr/include -x ProtocolHandlerInterface -P coolwsd 2> /dev/null | grep .; then \
+		echo you can examine each candidate with pahole -S -R --class_name=CANDIDATE coolwsd; \
+		exit 1; \
+	fi
+	@echo coolwsd struct packing is acceptably optimal
+
 czech: check
 	@echo "This should do something much cooler"
 
 collabora-online-sbom.spdx.json: coolforkit-ns
-	python3 $(abs_top_srcdir)/scripts/create-sbom.py $(abs_top_builddir)
+	$(QUIET_SBOM) python3 $(abs_top_srcdir)/scripts/create-sbom.py $(abs_top_builddir)

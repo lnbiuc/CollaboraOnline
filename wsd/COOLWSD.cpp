@@ -332,20 +332,21 @@ void COOLWSD::alertAllUsersInternal(const std::string& msg)
 }
 
 #if !MOBILEAPP
-void COOLWSD::syncUsersBrowserSettings(const std::string& userId, const std::string& key,
-                                       const std::string& value)
+void COOLWSD::syncUsersBrowserSettings(const std::string& userId, const pid_t childPid, const std::string& json)
 {
     if constexpr (Util::isMobileApp())
         return;
     std::lock_guard<std::mutex> docBrokersLock(DocBrokersMutex);
 
-    LOG_INF("Syncing browsersettings of the users");
+    LOG_INF("Syncing browsersettings for all the users");
 
     for (auto& brokerIt : DocBrokers)
     {
         std::shared_ptr<DocumentBroker> docBroker = brokerIt.second;
-        docBroker->addCallback([userId, key, value, docBroker]()
-                               { docBroker->syncBrowserSettings(userId, key, value); });
+        if (docBroker->getPid() == childPid)
+            continue;
+        docBroker->addCallback([userId, json, docBroker]()
+                               { docBroker->syncBrowserSettings(userId, json); });
     }
 }
 #endif
@@ -771,7 +772,6 @@ std::string COOLWSD::ServerName;
 std::string COOLWSD::FileServerRoot;
 std::string COOLWSD::ServiceRoot;
 std::string COOLWSD::TmpFontDir;
-std::string COOLWSD::TmpPresntTemplateDir;
 std::string COOLWSD::LOKitVersion;
 std::string COOLWSD::ConfigFile = COOLWSD_CONFIGDIR "/coolwsd.xml";
 std::string COOLWSD::ConfigDir = COOLWSD_CONFIGDIR "/conf.d";
@@ -1020,8 +1020,8 @@ public:
     bool watch(std::string configFile);
 
 private:
-    bool m_stopOnConfigChange;
     int m_watchedCount = 0;
+    bool m_stopOnConfigChange;
 };
 
 bool InotifySocket::watch(const std::string configFile)
@@ -1377,24 +1377,24 @@ void COOLWSD::innerInitialize(Poco::Util::Application& self)
 
     const auto logToFile = ConfigUtil::getConfigValue<bool>(conf, "logging.file[@enable]", false);
     std::map<std::string, std::string> logProperties;
-    for (std::size_t i = 0; ; ++i)
-    {
-        const std::string confPath = "logging.file.property[" + std::to_string(i) + ']';
-        const std::string confName = config().getString(confPath + "[@name]", "");
-        if (!confName.empty())
-        {
-            const std::string value = config().getString(confPath, "");
-            logProperties.emplace(confName, value);
-        }
-        else if (!config().has(confPath))
-        {
-            break;
-        }
-    }
-
-    // Setup the logfile envar for the kit processes.
     if (logToFile)
     {
+        for (std::size_t i = 0;; ++i)
+        {
+            const std::string confPath = "logging.file.property[" + std::to_string(i) + ']';
+            const std::string confName = config().getString(confPath + "[@name]", "");
+            if (!confName.empty())
+            {
+                const std::string value = config().getString(confPath, "");
+                logProperties.emplace(confName, value);
+            }
+            else if (!config().has(confPath))
+            {
+                break;
+            }
+        }
+
+        // Setup the logfile envar for the kit processes.
         const auto it = logProperties.find("path");
         if (it != logProperties.end())
         {
@@ -1406,26 +1406,27 @@ void COOLWSD::innerInitialize(Poco::Util::Application& self)
     }
 
     // Do the same for ui command logging
-    const auto logToFileUICmd = ConfigUtil::getConfigValue<bool>(conf, "logging_ui_cmd.file[@enable]", false);
+    const bool logToFileUICmd =
+        ConfigUtil::getConfigValue<bool>(conf, "logging_ui_cmd.file[@enable]", false);
     std::map<std::string, std::string> logPropertiesUICmd;
-    for (std::size_t i = 0; ; ++i)
-    {
-        const std::string confPath = "logging_ui_cmd.file.property[" + std::to_string(i) + ']';
-        const std::string confName = config().getString(confPath + "[@name]", "");
-        if (!confName.empty())
-        {
-            const std::string value = config().getString(confPath, "");
-            logPropertiesUICmd.emplace(confName, value);
-        }
-        else if (!config().has(confPath))
-        {
-            break;
-        }
-    }
-
-    // Setup the logfile envar for the kit processes.
     if (logToFileUICmd)
     {
+        for (std::size_t i = 0;; ++i)
+        {
+            const std::string confPath = "logging_ui_cmd.file.property[" + std::to_string(i) + ']';
+            const std::string confName = config().getString(confPath + "[@name]", "");
+            if (!confName.empty())
+            {
+                const std::string value = config().getString(confPath, "");
+                logPropertiesUICmd.emplace(confName, value);
+            }
+            else if (!config().has(confPath))
+            {
+                break;
+            }
+        }
+
+        // Setup the logfile envar for the kit processes.
         const auto it = logPropertiesUICmd.find("path");
         if (it != logPropertiesUICmd.end())
         {
@@ -3303,6 +3304,9 @@ public:
            << "\n  Admin: " << (COOLWSD::AdminEnabled ? "enabled" : "disabled")
            << "\n  RouteToken: " << COOLWSD::RouteToken
 #endif
+           << "\n  Uptime (seconds): " <<
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - COOLWSD::StartTime).count()
            << "\n  TerminationFlag: " << SigUtil::getTerminationFlag()
            << "\n  isShuttingDown: " << SigUtil::getShutdownRequestFlag()
            << "\n  NewChildren: " << NewChildren.size() << " (" << NewChildren.capacity() << ')'
@@ -3376,6 +3380,9 @@ public:
 
         os << '\n';
         COOLWSD::SavedClipboards->dumpState(os);
+
+        os << '\n';
+        FileServerRequestHandler::dumpState(os);
 #endif
 
         os << "\nDocument Broker polls " << "[ " << DocBrokers.size() << " ]:\n";
@@ -3533,6 +3540,8 @@ void COOLWSD::processFetchUpdate(SocketPoll& poll)
         request.add("Accept", "application/json");
 
         FetchHttpSession->setFinishedHandler([](const std::shared_ptr<http::Session>& httpSession) {
+            httpSession->asyncShutdown();
+
             std::shared_ptr<http::Response> httpResponse = httpSession->response();
 
             FetchHttpSession.reset();
@@ -3645,8 +3654,7 @@ int COOLWSD::innerMain()
     assert(Server && "The COOLWSDServer instance does not exist.");
     Server->findClientPort();
 
-    TmpFontDir = ChildRoot + JailUtil::CHILDROOT_TMP_INCOMING_PATH + "/fonts";
-    TmpPresntTemplateDir = ChildRoot + JailUtil::CHILDROOT_TMP_INCOMING_PATH + "/templates/presnt";
+    TmpFontDir = ChildRoot + JailUtil::CHILDROOT_TMP_INCOMING_PATH;
 
     // Start the internal prisoner server and spawn forkit,
     // which in turn forks first child.
@@ -3706,45 +3714,18 @@ int COOLWSD::innerMain()
         LOG_ERR("Log level is set very high to '" << LogLevel << "' this will have a "
                 "significant performance impact. Do not use this in production.");
 
-    std::string uriConfigKey;
-    const std::string& fontConfigKey = "remote_font_config.url";
-    const std::string& assetConfigKey = "remote_asset_config.url";
-    bool remoteFontDefined = !ConfigUtil::getConfigValue<std::string>(fontConfigKey, "").empty();
-    bool remoteAssetDefined = !ConfigUtil::getConfigValue<std::string>(assetConfigKey, "").empty();
-    // Both defined: warn and use assetConfigKey
-    if (remoteFontDefined && remoteAssetDefined)
+    // Start the remote font downloading polling thread.
+    std::unique_ptr<RemoteFontConfigPoll> remoteFontConfigThread;
+    try
     {
-        LOG_WRN("Both remote_font_config.url and remote_asset_config.url are defined, "
-                "remote_asset_config.url is overriden on remote_font_config.url");
-        uriConfigKey = assetConfigKey;
+        // Fetch font settings from server if configured
+        remoteFontConfigThread = std::make_unique<RemoteFontConfigPoll>(config());
+        remoteFontConfigThread->start();
     }
-    // only font defined: use fontConfigKey
-    else if (remoteFontDefined && !remoteAssetDefined)
+    catch (const Poco::Exception&)
     {
-        uriConfigKey = fontConfigKey;
+        LOG_DBG("No remote_font_config");
     }
-    // only asset defined: use assetConfigKey
-    else if (!remoteFontDefined && remoteAssetDefined)
-    {
-        uriConfigKey = assetConfigKey;
-    }
-
-    // Start the remote asset downloading polling thread.
-    std::unique_ptr<RemoteAssetConfigPoll> remoteAssetConfigThread;
-    if (!uriConfigKey.empty())
-    {
-        try
-        {
-            // Fetch font and/or templates settings from server if configured
-            remoteAssetConfigThread = std::make_unique<RemoteAssetConfigPoll>(config(), uriConfigKey);
-            remoteAssetConfigThread->start();
-        }
-        catch (const Poco::Exception&)
-        {
-            LOG_DBG("No remote_asset_config");
-        }
-    }
-
 #endif
 
     // URI with /contents are public and we don't need to anonymize them.
@@ -3907,6 +3888,12 @@ int COOLWSD::innerMain()
     // atexit handlers tend to free Admin before Documents
     LOG_INF("Exiting. Cleaning up lingering documents.");
 #if !MOBILEAPP
+    if (remoteFontConfigThread)
+    {
+        LOG_DBG("Stopping remote font config thread");
+        remoteFontConfigThread->stop();
+    }
+
     if (!SigUtil::getShutdownRequestFlag())
     {
         // This shouldn't happen, but it's fail safe to always cleanup properly.
@@ -4024,9 +4011,13 @@ int COOLWSD::innerMain()
 
     SigUtil::addActivity("terminated unused children");
 
+    ClientRequestDispatcher::uninitialize();
+
 #if !MOBILEAPP
     if (!Util::isKitInProcess())
     {
+        SigUtil::addActivity("waiting for forkit to exit");
+
         // Wait for forkit process finish.
         LOG_INF("Waiting for forkit process to exit");
         int status = 0;
@@ -4044,10 +4035,6 @@ int COOLWSD::innerMain()
 
     SigUtil::addActivity("finished with status " + std::to_string(returnValue));
 
-    // At least on centos7, Poco deadlocks while
-    // cleaning up its SSL context singleton.
-    Util::forcedExit(returnValue);
-
     return returnValue;
 #endif
 }
@@ -4057,7 +4044,7 @@ std::shared_ptr<TerminatingPoll> COOLWSD:: getWebServerPoll ()
     return WebServerPoll;
 }
 
-void COOLWSD::cleanup()
+void COOLWSD::cleanup([[maybe_unused]] int returnValue)
 {
     try
     {
@@ -4073,17 +4060,7 @@ void COOLWSD::cleanup()
         FileRequestHandler.reset();
         JWTAuth::cleanup();
 
-#if ENABLE_SSL
-        // Finally, we no longer need SSL.
-        if (ConfigUtil::isSslEnabled())
-        {
-            Poco::Net::uninitializeSSL();
-            Poco::Crypto::uninitializeCrypto();
-            ssl::Manager::uninitializeClientContext();
-            ssl::Manager::uninitializeServerContext();
-        }
-#endif
-#endif
+        Util::forcedExit(returnValue);
 
         TraceDumper.reset();
 
@@ -4091,8 +4068,30 @@ void COOLWSD::cleanup()
         SocketPoll::InhibitThreadChecks = true;
 
         // Delete these while the static Admin instance is still alive.
-        std::lock_guard<std::mutex> docBrokersLock(DocBrokersMutex);
-        DocBrokers.clear();
+        {
+            std::lock_guard<std::mutex> docBrokersLock(DocBrokersMutex);
+            DocBrokers.clear();
+        }
+
+        SigUtil::uninitialize();
+
+#if ENABLE_SSL
+        // Finally, we no longer need SSL.
+        if (ConfigUtil::isSslEnabled())
+        {
+#if !ENABLE_DEBUG
+            // At least on centos7, Poco deadlocks while
+            // cleaning up its SSL context singleton.
+            Util::forcedExit(returnValue);
+#endif // !ENABLE_DEBUG
+
+            Poco::Net::uninitializeSSL();
+            Poco::Crypto::uninitializeCrypto();
+            ssl::Manager::uninitializeClientContext();
+            ssl::Manager::uninitializeServerContext();
+        }
+#endif
+#endif
     }
     catch (const std::exception& ex)
     {
@@ -4106,7 +4105,7 @@ int COOLWSD::main(const std::vector<std::string>& /*args*/)
     SigUtil::resetTerminationFlags();
 #endif
 
-    int returnValue;
+    int returnValue = EXIT_SOFTWARE;
 
     try {
         returnValue = innerMain();
@@ -4114,16 +4113,23 @@ int COOLWSD::main(const std::vector<std::string>& /*args*/)
     catch (const std::exception& e)
     {
         LOG_FTL("Exception: " << e.what());
-        cleanup();
+        cleanup(returnValue);
         throw;
     } catch (...) {
-        cleanup();
+        cleanup(returnValue);
         throw;
     }
 
-    cleanup();
+    const int unitReturnValue = UnitBase::uninit();
+    if (unitReturnValue != EXIT_OK)
+    {
+        // Overwrite the return value if the unit-test failed.
+        LOG_INF("Overwriting process [coolwsd] exit status ["
+                << returnValue << "] with unit-test status: " << unitReturnValue);
+        returnValue = unitReturnValue;
+    }
 
-    returnValue = UnitBase::uninit();
+    cleanup(returnValue);
 
     LOG_INF("Process [coolwsd] finished with exit status: " << returnValue);
 
@@ -4231,7 +4237,7 @@ void dump_state()
     if (Server)
         Server->dumpState(oss);
 
-    oss << "\nMalloc info: \n" << Util::getMallocInfo() << '\n';
+    oss << "\nMalloc info [" << getpid() << "]: \n" << Util::getMallocInfo() << '\n';
 
     const std::string msg = oss.str();
     fprintf(stderr, "%s\n", msg.c_str());

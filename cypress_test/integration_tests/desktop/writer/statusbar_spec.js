@@ -12,6 +12,8 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Statubar tests.', function
 		if (Cypress.env('INTEGRATION') === 'nextcloud') {
 			desktopHelper.showStatusBarIfHidden ();
 		}
+
+		desktopHelper.shouldHaveZoomLevel('70');
 	});
 
 	it('Text selection.', function() {
@@ -25,7 +27,6 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Statubar tests.', function
 		cy.cGet('#menu-insert').click();
 		cy.cGet('body').contains('#menu-insert li a', 'Page Break').click();
 		desktopHelper.assertVisiblePage(1, 2, 2);
-		desktopHelper.makeZoomItemsVisible(); // make visible next and prev page buttons
 		cy.cGet('#toolbar-down #prev').click();
 		desktopHelper.assertVisiblePage(1, 1, 2);
 		desktopHelper.assertScrollbarPosition('vertical', 0, 10);
@@ -52,7 +53,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Statubar tests.', function
 	it('Select zoom level.', function() {
 		desktopHelper.resetZoomLevel();
 		desktopHelper.shouldHaveZoomLevel('100');
-		desktopHelper.selectZoomLevel('280');
+		desktopHelper.selectZoomLevel('280', false);
 		desktopHelper.shouldHaveZoomLevel('280');
 	});
 });

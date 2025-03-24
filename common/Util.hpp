@@ -377,6 +377,26 @@ namespace Util
     /// Replace substring @a in string @s with string @b.
     std::string replace(std::string s, const std::string& a, const std::string& b);
 
+    /// Replace character @a in string @s, in place, with character @b.
+    inline std::string& replaceInPlace(std::string& s, char a, char b)
+    {
+        for (std::size_t i = 0; i < s.size(); ++i)
+        {
+            if (s[i] == a)
+                s[i] = b;
+        }
+
+        return s;
+    }
+
+    /// Replace character @a in string @s with character @b.
+    inline std::string replace(const std::string_view s, char a, char b)
+    {
+        std::string res(s);
+        replaceInPlace(res, a, b);
+        return res;
+    }
+
     /// Replace any characters in @a matching characters in @b with replacement chars in @c and return
     std::string replaceAllOf(std::string_view str, std::string_view match, std::string_view repl);
 
@@ -1051,11 +1071,9 @@ int main(int argc, char**argv)
             // Non-Prefix part
             return std::string(str_pos, str.end());
         }
-        else
-        {
-            // Return the original string as it is
-            return str;
-        }
+
+        // Return the original string as it is
+        return str;
     }
 
     /// Split a string in two at the delimiter, removing it.
@@ -1167,29 +1185,29 @@ int main(int argc, char**argv)
         {
         }
 
-        RegexListMatcher(const bool allowByDefault) :
-            _allowByDefault(allowByDefault)
+        RegexListMatcher(const bool allowByDefault)
+            : _allowByDefault(allowByDefault)
         {
         }
 
-        RegexListMatcher(std::initializer_list<std::string> allowed) :
-            _allowByDefault(false),
-            _allowed(allowed)
+        RegexListMatcher(std::initializer_list<std::string> allowed)
+            : _allowed(allowed)
+            , _allowByDefault(false)
         {
         }
 
         RegexListMatcher(std::initializer_list<std::string> allowed,
-                         std::initializer_list<std::string> denied) :
-            _allowByDefault(false),
-            _allowed(allowed),
-            _denied(denied)
+                         std::initializer_list<std::string> denied)
+            : _allowed(allowed)
+            , _denied(denied)
+            , _allowByDefault(false)
         {
         }
 
         RegexListMatcher(const bool allowByDefault,
-                         std::initializer_list<std::string> denied) :
-            _allowByDefault(allowByDefault),
-            _denied(denied)
+                         std::initializer_list<std::string> denied)
+            : _denied(denied)
+            , _allowByDefault(allowByDefault)
         {
         }
 
@@ -1226,9 +1244,9 @@ int main(int argc, char**argv)
         }
 
     private:
-        const bool _allowByDefault;
         std::set<std::string> _allowed;
         std::set<std::string> _denied;
+        const bool _allowByDefault;
     };
 
     /// Simple backtrace capture
@@ -1252,9 +1270,9 @@ int main(int argc, char**argv)
         };
 
     private:
-        int skipFrames;
         /// Stack frames {address, symbol}
         std::vector<std::pair<void*, Symbol>> _frames;
+        int skipFrames;
 
         static bool separateRawSymbol(const std::string& raw, Symbol& s);
 
@@ -1537,7 +1555,7 @@ int main(int argc, char**argv)
 
     /// Stringify elements from a container of pairs with a delimiter to a stream.
     template <typename S, typename T>
-    void joinPair(S& stream, const T& container, const char* delimiter = " / ")
+    void joinPair(S& stream, const T& container, const std::string_view delimiter = " / ")
     {
         unsigned i = 0;
         for (const auto& pair : container)
@@ -1547,7 +1565,8 @@ int main(int argc, char**argv)
     }
 
     /// Stringify elements from a container of pairs with a delimiter to string.
-    template <typename T> std::string joinPair(const T& container, const char* delimiter = " / ")
+    template <typename T>
+    std::string joinPair(const T& container, const std::string_view delimiter = " / ")
     {
         std::ostringstream oss;
         joinPair(oss, container, delimiter);
@@ -1598,5 +1617,11 @@ inline std::ostream& operator<<(std::ostream& os, const std::chrono::system_cloc
 }
 
 inline std::ostream& operator<<(std::ostream& os, const Util::Backtrace& bt) { return bt.send(os); }
+
+// std::to_underlying will be available in C++23
+template <typename Enum> constexpr std::underlying_type_t<Enum> to_underlying(Enum e)
+{
+   return static_cast<std::underlying_type_t<Enum>>(e);
+}
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

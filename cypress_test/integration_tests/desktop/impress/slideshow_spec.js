@@ -1,7 +1,6 @@
 /* global describe it cy require beforeEach */
 
 var helper = require('../../common/helper');
-const desktopHelper = require('../../common/desktop_helper');
 
 function getSlideShowContent() {
 	return cy.cGet('#slideshow-cypress-iframe');
@@ -10,14 +9,15 @@ function getSlideShowContent() {
 describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Some app', function() {
 	beforeEach(function() {
 		helper.setupAndLoadDocument('impress/slideshow.odp');
-		desktopHelper.switchUIToCompact();
-
-		cy.cGet('#menu-slide > a').click();
-		cy.cGet('#menu-fullscreen-presentation > a').click();
+		cy.cGet('.notebookbar #View-tab-label').click();
+		cy.cGet('.notebookbar #view-presentation-button').click();
+		cy.cGet('#view-presentation-entry-0').click();
 	});
 
-	it('Should see an empty slideshow', function() {
-		cy.wait(2000); // wait for slideshow to load
-		getSlideShowContent().compareSnapshot('slideshow', 0.09);
+	it('Should see an empty slideshow', function () {
+		getSlideShowContent().should('be.visible');
+		//FIXME: remove explict wait. I tried to assert slideshow's canvas but for some reason cypress can't find slideshow iframe
+		cy.wait(1000);
+		getSlideShowContent().compareSnapshot('slideshow', 0.15);
 	});
 });

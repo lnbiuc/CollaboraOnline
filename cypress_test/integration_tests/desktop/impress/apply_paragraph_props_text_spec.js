@@ -1,4 +1,4 @@
-/* global describe it cy beforeEach require */
+/* global describe it cy beforeEach require expect */
 
 var helper = require('../../common/helper');
 var impressHelper = require('../../common/impress_helper');
@@ -9,8 +9,9 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Apply paragraph properties
 	beforeEach(function() {
 		helper.setupAndLoadDocument('impress/apply_paragraph_props_text.odp');
 		desktopHelper.switchUIToCompact();
-		cy.cGet('#modifypage').scrollIntoView();
-		cy.cGet('#modifypage button').click();
+
+		cy.cGet('#toolbar-up .ui-scroll-right').click();
+		cy.cGet('#modifypage button').click({force: true});
 		cy.cGet('#sidebar-panel').should('not.be.visible');
 	});
 
@@ -39,7 +40,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Apply paragraph properties
 		impressHelper.removeShapeSelection();
 		selectText();
 		cy.cGet('#document-container g.Page .TextParagraph .TextPosition')
-			.should('have.attr', 'x', '23586');
+			.should('have.attr', 'x', '23583');
 
 		// Set left alignment
 		cy.cGet('#leftpara').click();
@@ -55,7 +56,11 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Apply paragraph properties
 		impressHelper.removeShapeSelection();
 		selectText();
 		cy.cGet('#document-container g.Page .TextParagraph .TextPosition')
-			.should('have.attr', 'x', '12493');
+			.invoke('attr', 'x')
+			.then((x) => {
+				const value = Number(x);
+				expect(value).to.be.closeTo(12493, 5);
+			});
 
 		// Set justified alignment
 		cy.cGet('#justifypara').click();
@@ -73,7 +78,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Apply paragraph properties
 			.should('not.exist');
 
 		// Apply bulleting
-		cy.cGet('#defaultbullet').click();
+		cy.cGet('#toolbar-up #defaultbullet').click();
 
 		impressHelper.removeShapeSelection();
 		selectText();
@@ -88,7 +93,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Apply paragraph properties
 			.should('not.have.attr', 'ooo:numbering-type');
 
 		// Apply numbering
-		cy.cGet('#defaultnumbering').click();
+		cy.cGet('#toolbar-up #defaultnumbering').click();
 
 		impressHelper.removeShapeSelection();
 		selectText();

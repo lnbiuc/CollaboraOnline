@@ -45,10 +45,10 @@ private:
     void sendTextFrame(const std::string& message);
 
 private:
+    std::string _clientIPAdress;
     Admin* _admin;
     int _sessionId;
     bool _isAuthenticated;
-    std::string _clientIPAdress;
 };
 
 class MonitorSocketHandler : public AdminSocketHandler
@@ -64,20 +64,20 @@ public:
     void onDisconnect() override;
 
 private:
-    bool _connecting;
     std::string _uri;
+    bool _connecting;
 };
 
 class MemoryStatsTask;
 
 /// An admin command processor.
-class Admin : public SocketPoll
+class Admin final : public SocketPoll
 {
     Admin(const Admin &) = delete;
     Admin& operator = (const Admin &) = delete;
     Admin();
 public:
-    virtual ~Admin();
+    ~Admin() override;
 
     static Admin& instance()
     {
@@ -112,8 +112,8 @@ public:
 
     /// Calls with same pid will increment view count, if pid already exists
     void addDoc(const std::string& docKey, pid_t pid, const std::string& filename,
-                const std::string& sessionId, const std::string& userName, const std::string& userId,
-                const int smapsFD, const std::string& wopiSrc, bool readOnly);
+                const std::string& sessionId, const std::string& userName,
+                const std::string& userId, int smapsFD, const std::string& wopiSrc, bool readOnly);
 
     /// Decrement view count till becomes zero after which doc is removed
     void rmDoc(const std::string& docKey, const std::string& sessionId);
@@ -167,7 +167,8 @@ public:
 
     void setViewLoadDuration(const std::string& docKey, const std::string& sessionId, std::chrono::milliseconds viewLoadDuration);
     void setDocWopiDownloadDuration(const std::string& docKey, std::chrono::milliseconds wopiDownloadDuration);
-    void setDocWopiUploadDuration(const std::string& docKey, const std::chrono::milliseconds uploadDuration);
+    void setDocWopiUploadDuration(const std::string& docKey,
+                                  std::chrono::milliseconds uploadDuration);
     void addErrorExitCounters(unsigned segFaultCount, unsigned killedCount,
                               unsigned oomKilledCount);
     void addLostKitsTerminated(unsigned lostKitsTerminated);
@@ -214,24 +215,25 @@ private:
     void connectToMonitorSync(const std::string &uri);
 
 private:
+    /// The model is accessed only during startup & in
+    /// the Admin Poll thread.
+    AdminModel _model;
+    DocProcSettings _defDocProcSettings;
+    // map to make sure only connection with unique monitor uri exists
+    std::map<std::string, std::shared_ptr<MonitorSocketHandler>> _monitorSockets;
+
     /// The total installed system memory (RAM).
     /// Technically, can be augmented at runtime, but we don't update it.
     const size_t _totalSysMemKb;
     /// The total available memory to our process, per memproportion.
     size_t _totalAvailMemKb;
 
-    /// The model is accessed only during startup & in
-    /// the Admin Poll thread.
-    AdminModel _model;
-    int _forKitPid;
     size_t _lastTotalMemory;
     size_t _lastJiffies;
+    size_t _cleanupIntervalMs;
     uint64_t _lastSentCount;
     uint64_t _lastRecvCount;
     std::string _forkitLogLevel;
-
-    /// When set, the metrics will be dumped into the log and stderr.
-    std::atomic_bool _dumpMetrics;
 
     struct MonitorConnectRecord
     {
@@ -247,20 +249,20 @@ private:
     };
     std::vector<MonitorConnectRecord> _pendingConnects;
 
+    int _forKitPid;
+
     int _cpuStatsTaskIntervalMs;
     int _memStatsTaskIntervalMs;
     int _netStatsTaskIntervalMs;
-    size_t _cleanupIntervalMs;
-    DocProcSettings _defDocProcSettings;
+
+    /// When set, the metrics will be dumped into the log and stderr.
+    std::atomic_bool _dumpMetrics;
+
+    std::atomic<bool> _closeMonitor = false;
 
     // Don't update any more frequently than this since it's excessive.
     static const int MinStatsIntervalMs;
     static const int DefStatsIntervalMs;
-
-    // map to make sure only connection with unique monitor uri exists
-    std::map<std::string, std::shared_ptr<MonitorSocketHandler>> _monitorSockets;
-
-    std::atomic<bool> _closeMonitor = false;
 };
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

@@ -30,20 +30,20 @@
 class WebSocketHandler : public ProtocolHandlerInterface
 {
 private:
+#if !MOBILEAPP
+    /// The security key. Meaningful only for clients.
+    const std::string _key;
+#endif
+    std::vector<char> _wsPayload;
     /// The socket that owns us (we can't own it).
     std::weak_ptr<StreamSocket> _socket;
-
 #if !MOBILEAPP
     std::chrono::steady_clock::time_point _lastPingSentTime;
     int _pingTimeUs;
     bool _isMasking;
     bool _inFragmentBlock;
-    /// The security key. Meaningful only for clients.
-    const std::string _key;
     unsigned char _lastFlags; ///< The flags in the last frame.
 #endif
-
-    std::vector<char> _wsPayload;
     std::atomic<bool> _shuttingDown;
     const bool _isClient;
 
@@ -72,13 +72,13 @@ public:
     WebSocketHandler(bool isClient, [[maybe_unused]] bool isMasking)
         :
 #if !MOBILEAPP
-        _lastPingSentTime(std::chrono::steady_clock::now() -
-                          PingFrequencyMicroS +
-                          std::chrono::microseconds(InitialPingDelayMicroS))
+        _key(isClient ? generateKey() : std::string())
+        , _lastPingSentTime(std::chrono::steady_clock::now() -
+                           PingFrequencyMicroS +
+                           std::chrono::microseconds(InitialPingDelayMicroS))
         , _pingTimeUs(0)
         , _isMasking(isClient && isMasking)
         , _inFragmentBlock(false)
-        , _key(isClient ? generateKey() : std::string())
         , _lastFlags(0)
         ,
 #endif
@@ -191,9 +191,9 @@ protected:
             return;
         }
 
-        if (socket->isClosed())
+        if (socket->isShutdown())
         {
-            LOG_DBG("Socket is closed. Cannot send Close Frame");
+            LOG_DBG("Socket is shut down. Cannot send Close Frame");
             return;
         }
 
@@ -259,7 +259,7 @@ public:
     bool isConnected() const
     {
         std::shared_ptr<StreamSocket> socket = _socket.lock();
-        return socket && !socket->isClosed();
+        return socket && !socket->isShutdown();
     }
 
 private:
@@ -289,7 +289,7 @@ private:
 
             // force close after writing this message (real shutdown)
             if (hardShutdown)
-                socket->closeConnection();
+                socket->shutdownConnection();
         }
 
         _wsPayload.clear();
@@ -821,9 +821,9 @@ protected:
             return -1;
         }
 
-        if (socket->isClosed())
+        if (socket->isShutdown())
         {
-            LOG_DBG("Socket is closed. Cannot send WS frame");
+            LOG_DBG("Socket is shut down. Cannot send WS frame");
             return 0;
         }
 
@@ -901,7 +901,7 @@ protected:
             // But more important is to flush the data we have before closing the socket.
             // There is a FIXME item in Session::shutdown specifically to address this case.
             // When we terminate a client's connection in DocumentBroker::finalRemoveSession,
-            // we send the close frame and close the socket via Socket::closeConnection(),
+            // we send the close frame and close the socket via Socket::shutdownConnection(),
             // which is called immediately after *this* function (see shutdown() above).
             // So, a common scenario is when we want to shutdown all clients. The stack
             // trace looks like this:

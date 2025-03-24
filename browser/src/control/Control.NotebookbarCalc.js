@@ -260,19 +260,21 @@ L.Control.NotebookbarCalc = L.Control.NotebookbarWriter.extend({
 				]
 			});
 		}
-		content.push(
-			{
-				'type': 'container',
-				'children': [
-					{
-						'id': 'renamedocument',
-						'class': 'unoRenameDocument',
-						'type': 'bigcustomtoolitem',
-						'text': _('Rename'),
-					}
-				]
-			}
-		);
+		if (this._map['wopi']._supportsRename() && this._map['wopi'].UserCanRename) {
+			content.push(
+				{
+					'type': 'container',
+					'children': [
+						{
+							'id': 'renamedocument',
+							'class': 'unoRenameDocument',
+							'type': 'bigcustomtoolitem',
+							'text': _('Rename'),
+						}
+					]
+				}
+			);
+		}
 
 		return this.getTabPage('File', content);
 	},
@@ -643,7 +645,13 @@ L.Control.NotebookbarCalc = L.Control.NotebookbarWriter.extend({
 										'text': _UNO('.uno:NumberFormatCurrency', 'spreadsheet'),
 										'command': '.uno:NumberFormatCurrency',
 										'accessibility': { focusBack: true,	combination: 'P', de: null }
-									},
+									}
+								]
+							},
+							{
+								'id': 'home-number-format-percent-decimal',
+								'type': 'toolbox',
+								'children': [
 									{
 										'id': 'home-number-format-percent',
 										'type': 'toolitem',

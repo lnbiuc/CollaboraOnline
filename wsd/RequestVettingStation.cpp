@@ -48,9 +48,9 @@ void sendLoadResult(const std::shared_ptr<ClientSession>& clientSession, bool su
     const std::string resultstr = success ? "true" : "false";
     // Some sane limit, otherwise we get problems transferring this
     // to the client with large strings (can be a whole webpage)
-    // Replace reserved characters
+    // Replace reserved characters before sending.
     std::string errorMsgFormatted = COOLProtocol::getAbbreviatedMessage(errorMsg);
-    errorMsgFormatted = Poco::translate(errorMsg, "\"", "'");
+    Util::replaceInPlace(errorMsgFormatted, '"', '\'');
     clientSession->sendTextFrame(
         "commandresult: { \"command\": \"load\", \"success\": " + resultstr + ", \"result\": \"" +
         result + "\", \"errorMsg\": \"" + errorMsgFormatted + "\"}");
@@ -218,6 +218,7 @@ void RequestVettingStation::launchInstallPresets()
     std::string configIdPresets = Poco::Path(presetsPath, Uri::encode(configId)).toString();
     Poco::File(Poco::Path(configIdPresets, "autotext")).createDirectories();
     Poco::File(Poco::Path(configIdPresets, "wordbook")).createDirectories();
+    Poco::File(Poco::Path(configIdPresets, "template")).createDirectories();
     // ensure the server config is downloaded and populate a subforkit when config is available
     _asyncInstallTask = DocumentBroker::asyncInstallPresets(*_poll, configId, sharedSettings.getUri(), configIdPresets,
                                                             nullptr, finishedCallback);

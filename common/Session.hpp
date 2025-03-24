@@ -33,30 +33,30 @@ class Session;
 template<class T>
 class SessionMap : public std::map<std::string, std::shared_ptr<T> >
 {
-    std::map<std::string, int> _canonicalIds;
+    std::map<std::string, CanonicalViewId> _canonicalIds;
 public:
     SessionMap() {
         static_assert(std::is_base_of<Session, T>::value, "sessions must have base of Session");
     }
 
     /// Generate a unique key for this set of view properties, only used by WSD
-    int createCanonicalId(const std::string &viewProps)
+    CanonicalViewId createCanonicalId(const std::string &viewProps)
     {
         if (viewProps.empty())
-            return 0;
+            return CanonicalViewId::None;
         for (const auto& it : _canonicalIds)
         {
             if (it.first == viewProps)
                 return it.second;
         }
 
-        const std::size_t id = _canonicalIds.size() + 1000;
+        const CanonicalViewId id = static_cast<CanonicalViewId>(_canonicalIds.size() + 1000);
         _canonicalIds[viewProps] = id;
         return id;
     }
 
     /// Lookup one session in the map that matches this canonical view id, only used by Kit
-    std::shared_ptr<T> findByCanonicalId(int id) const
+    std::shared_ptr<T> findByCanonicalId(CanonicalViewId id) const
     {
         for (const auto &it : *this) {
             if (it.second->getCanonicalViewId() == id)
@@ -127,7 +127,7 @@ public:
 
     /// overridden to prepend client ids on messages by the Kit
     virtual bool sendBinaryFrame(const char* buffer, int length);
-    virtual bool sendTextFrame(const char* buffer, const int length);
+    virtual bool sendTextFrame(const char* buffer, int length);
 
     /// Get notified that the underlying transports disconnected
     void onDisconnect() override { /* ignore */ }
@@ -262,7 +262,7 @@ public:
 
     const std::string& getDocPassword() const { return _docPassword; }
 
-    const std::optional<bool> getIsAdminUser() const { return _isAdminUser; }
+    std::optional<bool> getIsAdminUser() const { return _isAdminUser; }
 
     const std::string& getUserExtraInfo() const { return _userExtraInfo; }
 
@@ -336,32 +336,6 @@ private:
     /// A readable name that identifies our peer and ID.
     const std::string _name;
 
-    /// True if we have been disconnected.
-    std::atomic<bool> _disconnected;
-    /// True if the user is active, otherwise false (switched tabs).
-    std::atomic<bool> _isActive;
-
-    /// Time of the last interactive event being received
-    std::chrono::steady_clock::time_point _lastActivityTime;
-
-    // Whether websocket received close frame.  Closing Handshake
-    std::atomic<bool> _isCloseFrame;
-
-    /// Whether the session has write permission in storage, as received from WOPI or URL parameters.
-    /// This doesn't change once set.
-    bool _writePermission;
-
-    /// Whether the session can write in storage. May be disabled on error (e.g. low storage).
-    /// Note: A read-only document may still be writable (if _isAllowChangeComments is true), f.e. PDF.
-    bool _isWritable;
-
-    /// Whether the session can edit the document. Disabled when we fail to lock, for example.
-    bool _isReadOnly;
-
-    /// Whether the session can add/change comments.
-    /// Must have _isWritable=true, regardless of _isReadOnly.
-    bool _isAllowChangeComments;
-
     /// The actual URL, also in the child, even if the child never accesses that.
     std::string _docURL;
 
@@ -373,12 +347,6 @@ private:
 
     /// Password provided, if any, to open the document
     std::string _docPassword;
-
-    /// If password is provided or not
-    bool _haveDocPassword;
-
-    /// Whether document is password protected
-    bool _isDocPasswordProtected;
 
     /// Document options: a JSON string, containing options (rendering, also possibly load in the future).
     std::string _docOptions;
@@ -395,9 +363,6 @@ private:
     /// Name of the user to whom the session belongs to, anonymized for logging.
     std::string _userNameAnonym;
 
-    /// If user is admin on the integrator side
-    std::optional<bool> _isAdminUser;
-
     /// Extra info per user, mostly mail, avatar, links, etc.
     std::string _userExtraInfo;
 
@@ -409,9 +374,6 @@ private:
 
     /// In case a watermark has to be rendered on each tile.
     std::string _watermarkText;
-
-    /// Opacity in case a watermark has to be rendered on each tile.
-    double _watermarkOpacity;
 
     /// Language for the document based on what the user has in the UI.
     std::string _lang;
@@ -442,6 +404,46 @@ private:
 
     std::string _initialClientVisibleArea;
 
+    // The url of the template file used to create the document
+    std::string _docTemplate;
+
+    /// Opacity in case a watermark has to be rendered on each tile.
+    double _watermarkOpacity;
+
+    /// Time of the last interactive event being received
+    std::chrono::steady_clock::time_point _lastActivityTime;
+
+    /// If user is admin on the integrator side
+    std::optional<bool> _isAdminUser;
+
+    /// True if we have been disconnected.
+    std::atomic<bool> _disconnected;
+    /// True if the user is active, otherwise false (switched tabs).
+    std::atomic<bool> _isActive;
+    // Whether websocket received close frame.  Closing Handshake
+    std::atomic<bool> _isCloseFrame;
+
+    /// Whether the session has write permission in storage, as received from WOPI or URL parameters.
+    /// This doesn't change once set.
+    bool _writePermission;
+
+    /// Whether the session can write in storage. May be disabled on error (e.g. low storage).
+    /// Note: A read-only document may still be writable (if _isAllowChangeComments is true), f.e. PDF.
+    bool _isWritable;
+
+    /// Whether the session can edit the document. Disabled when we fail to lock, for example.
+    bool _isReadOnly;
+
+    /// Whether the session can add/change comments.
+    /// Must have _isWritable=true, regardless of _isReadOnly.
+    bool _isAllowChangeComments;
+
+    /// If password is provided or not
+    bool _haveDocPassword;
+
+    /// Whether document is password protected
+    bool _isDocPasswordProtected;
+
     /// Specifies whether accessibility support is enabled for this session.
     bool _accessibilityState;
 
@@ -449,8 +451,6 @@ private:
     /// should be disabled in core
     bool _disableVerifyHost;
 
-    // The url of the template file used to create the document
-    std::string _docTemplate;
 };
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

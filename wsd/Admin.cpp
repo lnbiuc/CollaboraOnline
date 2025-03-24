@@ -13,6 +13,7 @@
 
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -520,15 +521,15 @@ Admin::Admin()
     : SocketPoll("admin")
     , _totalSysMemKb(Util::getTotalSystemMemoryKb())
     , _totalAvailMemKb(_totalSysMemKb)
-    , _forKitPid(-1)
     , _lastTotalMemory(0)
     , _lastJiffies(0)
+    , _cleanupIntervalMs(DefStatsIntervalMs * 10)
     , _lastSentCount(0)
     , _lastRecvCount(0)
+    , _forKitPid(-1)
     , _cpuStatsTaskIntervalMs(DefStatsIntervalMs)
     , _memStatsTaskIntervalMs(DefStatsIntervalMs * 2)
     , _netStatsTaskIntervalMs(DefStatsIntervalMs * 2)
-    , _cleanupIntervalMs(DefStatsIntervalMs * 10)
 {
     LOG_INF("Admin ctor");
 
@@ -1027,35 +1028,43 @@ void Admin::triggerMemoryCleanup(const size_t totalMem)
             memLimit << "% (" << static_cast<size_t>(_totalSysMemKb * memLimit / 100.) << " KB).");
 
     const double memToFreePercentage = (totalMem / static_cast<double>(_totalSysMemKb)) - memLimit / 100.;
-    int memToFreeKb = clamp<double>(memToFreePercentage * _totalSysMemKb, 0, std::numeric_limits<int>::max());
-    // Don't kill documents to save a KB or two.
-    if (memToFreeKb > 1024)
+    int64_t memToFreeKb =
+        clamp<double>(memToFreePercentage * _totalSysMemKb, 0, std::numeric_limits<int>::max());
+
+    // Don't kill documents to save a MB or two.
+    constexpr int64_t MinMemToFreeKB = 1024;
+    if (memToFreeKb <= MinMemToFreeKB)
     {
-        // prepare document list sorted by most idle times
-        const std::vector<DocBasicInfo> docList = _model.getDocumentsSortedByIdle();
+        return;
+    }
 
-        LOG_TRC("OOM: Memory to free: " << memToFreePercentage << "% (" <<
-                memToFreeKb << " KB) from " << docList.size() << " docs.");
+    // prepare document list sorted by most idle times
+    const std::vector<DocBasicInfo> docList = _model.getDocumentsSortedByIdle();
 
-        for (const auto& doc : docList)
+    LOG_TRC("OOM: Memory to free: " << memToFreePercentage << "% (" << memToFreeKb << " KB) from "
+                                    << docList.size() << " docs");
+
+    for (const auto& doc : docList)
+    {
+        LOG_TRC("OOM Document: DocKey: [" << doc.getDocKey() << "], Idletime: ["
+                                          << doc.getIdleTime() << "]," << " Saved: ["
+                                          << doc.getSaved() << "], Mem: [" << doc.getMem() << ']');
+        if (doc.getSaved())
         {
-            LOG_TRC("OOM Document: DocKey: [" << doc.getDocKey() << "], Idletime: [" << doc.getIdleTime() << "]," <<
-                    " Saved: [" << doc.getSaved() << "], Mem: [" << doc.getMem() << "].");
-            if (doc.getSaved())
-            {
-                // Kill the saved documents first.
-                LOG_DBG("OOM: Killing saved document with DocKey [" << doc.getDocKey() << "] with " << doc.getMem() << " KB.");
-                COOLWSD::closeDocument(doc.getDocKey(), "oom");
-                memToFreeKb -= doc.getMem();
-                if (memToFreeKb <= 1024)
-                    break;
-            }
-            else
-            {
-                // Save unsaved documents.
-                LOG_TRC("Saving document: DocKey [" << doc.getDocKey() << "].");
-                COOLWSD::autoSave(doc.getDocKey());
-            }
+            // Kill the saved documents first.
+            LOG_WRN("OOM: Killing saved document with DocKey ["
+                    << doc.getDocKey() << "], Idletime: [" << doc.getIdleTime() << "] using "
+                    << doc.getMem() << " KB");
+            COOLWSD::closeDocument(doc.getDocKey(), "oom");
+            memToFreeKb -= doc.getMem();
+            if (memToFreeKb <= MinMemToFreeKB)
+                break;
+        }
+        else
+        {
+            // Save unsaved documents.
+            LOG_DBG("Saving document: DocKey [" << doc.getDocKey() << ']');
+            COOLWSD::autoSave(doc.getDocKey());
         }
     }
 }
@@ -1131,10 +1140,10 @@ void Admin::dumpState(std::ostream& os) const
 }
 
 
-MonitorSocketHandler::MonitorSocketHandler(Admin *admin, const std::string &uri) :
-    AdminSocketHandler(admin),
-    _connecting(true),
-    _uri(uri)
+MonitorSocketHandler::MonitorSocketHandler(Admin *admin, const std::string &uri)
+    : AdminSocketHandler(admin)
+    , _uri(uri)
+    , _connecting(true)
 {
 }
 

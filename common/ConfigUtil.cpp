@@ -195,7 +195,7 @@ static const std::unordered_map<std::string, std::string> DefAppConfig = {
     { "per_document.background_manualsave", "true" },
     { "per_document.batch_priority", "5" },
     { "per_document.bgsave_priority", "5" },
-    { "per_document.bgsave_timeout_secs", "60" },
+    { "per_document.bgsave_timeout_secs", "120" },
     { "per_document.cleanup.bad_behavior_period_secs", "60" },
     { "per_document.cleanup.cleanup_interval_ms", "10000" },
     { "per_document.cleanup.idle_time_secs", "300" },
@@ -297,7 +297,6 @@ static const std::unordered_map<std::string, std::string> DefAppConfig = {
     { "watermark.text", "" },
     { "welcome.enable", "false" },
     { "zotero.enable", "true" },
-    { "setting_iframe.enable", "true" },
 };
 
 void initialize(const Poco::Util::AbstractConfiguration* config)

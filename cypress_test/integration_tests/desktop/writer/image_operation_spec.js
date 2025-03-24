@@ -8,7 +8,7 @@ describe(['tagdesktop'], 'Image Operation Tests', function() {
 
 	beforeEach(function() {
 		helper.setupAndLoadDocument('writer/image_operation.odt');
-		desktopHelper.switchUIToNotebookbar();
+		desktopHelper.shouldHaveZoomLevel('70');
 	});
 
 	it('Insert Image',function() {
@@ -47,11 +47,12 @@ describe(['tagdesktop'], 'Image Operation Tests', function() {
 	});
 
 	it('Resize image when keep ratio option enabled and disabled', function() {
+		cy.viewport(1000, 660);
+
 		insertImage();
 		//when Keep ratio is unchecked
 		helper.assertImageSize(248, 63);
 		// if window is too small sidebar won't popup
-		cy.viewport(1000, 660);
 
 		helper.waitUntilIdle('#selectwidth input');
 

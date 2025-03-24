@@ -28,6 +28,12 @@ class TileCoordData {
 	part: number;
 	mode: number;
 
+	/*
+		No need to calculate the scale every time. We have the current scale, reachable via app.getScale().
+		We can compare these two when we need check if a tile is in the current scale. Assigned on creation.
+	*/
+	scale: number;
+
 	constructor(
 		left: number,
 		top: number,
@@ -40,6 +46,8 @@ class TileCoordData {
 		this.z = zoom !== null ? zoom : app.map.getZoom();
 		this.part = part !== null ? part : app.map._docLayer._selectedPart;
 		this.mode = mode !== undefined ? mode : 0;
+
+		this.scale = Math.round(Math.pow(1.2, this.z - 10) * 1000) / 1000;
 	}
 
 	getPos() {
@@ -130,6 +138,7 @@ class Tile {
 	coords: TileCoordData;
 	current: boolean = true; // is this currently visible
 	canvas: any = null; // canvas ready to render
+	ctx: CanvasRenderingContext2D | null = null; // canvas context to render onto
 	imgDataCache: any = null; // flat byte array of canvas data
 	rawDeltas: any = null; // deltas ready to decompress
 	deltaCount: number = 0; // how many deltas on top of the keyframe
@@ -142,6 +151,7 @@ class Tile {
 	wireId: number = 0; // monotonic timestamp for optimizing fetch
 	invalidFrom: number = 0; // a wireId - for avoiding races on invalidation
 	lastRendered: Date = new Date();
+	private lastRequestTime: Date = undefined; // when did we last do a tilecombine request.
 	hasPendingDelta: 0;
 	hasPendingKeyframe: 0;
 
@@ -167,6 +177,111 @@ class Tile {
 
 	hasPendingUpdate(): boolean {
 		return this.hasPendingDelta > 0 || this.hasPendingKeyframe > 0;
+	}
+
+	/// Demand a whole tile back to the keyframe from coolwsd.
+	forceKeyframe() {
+		this.wireId = 0;
+		this.invalidFrom = 0;
+		this.allowFastRequest();
+	}
+
+	/// Avoid continually re-requesting tiles for eg. preloading
+	requestingTooFast(now: Date): boolean {
+		const tooFast: boolean =
+			this.lastRequestTime &&
+			now.getTime() - this.lastRequestTime.getTime() < 5000; /* ms */
+		return tooFast;
+	}
+
+	updateLastRequest(now: Date) {
+		this.lastRequestTime = now;
+	}
+
+	/// Allow faster requests
+	allowFastRequest() {
+		this.updateLastRequest(undefined);
+	}
+
+	isReadyToDraw(): boolean {
+		return !!this.imgDataCache;
+	}
+}
+
+class CanvasItem {
+	canvas: HTMLCanvasElement | null = null;
+	ctx: CanvasRenderingContext2D | null = null;
+}
+
+// Allocating and freeing canvas' is surprisingly expensive and
+// can block rendering for long periods, so re-use canvas' instead.
+class CanvasCache {
+	private _tileSize: number;
+
+	private _canvasList: CanvasItem[] = [];
+
+	constructor(tileSize: number) {
+		this._tileSize = tileSize;
+	}
+
+	get size() {
+		return this._canvasList.length;
+	}
+
+	acquireCanvas(tile: Tile): CanvasRenderingContext2D | null {
+		let item: CanvasItem;
+
+		if (this._canvasList.length === 0) {
+			item = new CanvasItem();
+
+			// This allocation is usually cheap and reliable,
+			// getting the canvas context, not so much.
+			item.canvas = document.createElement('canvas');
+			item.canvas.width = this._tileSize;
+			item.canvas.height = this._tileSize;
+
+			// So we need to grab the context too ...
+			item.ctx = item.canvas.getContext('2d');
+			// handle null item.ctx higher up
+		} else item = this._canvasList.pop();
+
+		tile.canvas = item.canvas;
+		tile.ctx = item.ctx;
+
+		return item.ctx;
+	}
+
+	releaseCanvas(tile: Tile) {
+		if (tile.canvas && tile.ctx) {
+			var item: CanvasItem = new CanvasItem();
+			item.canvas = tile.canvas;
+			item.ctx = tile.ctx;
+			this._canvasList.push(item);
+		}
+
+		tile.canvas = null;
+		tile.ctx = null;
+		tile.imgDataCache = null;
+	}
+
+	trim(limit: number) {
+		while (this._canvasList.length > limit) {
+			const item = this._canvasList.pop();
+
+			// Fix for cool#5876 allow immediate reuse of canvas context memory
+			// WKWebView has a hard limit on the number of bytes of canvas
+			// context memory that can be allocated. Reducing the canvas
+			// size to zero is a way to reduce the number of bytes counted
+			// against this limit.
+			item.canvas.width = 0;
+			item.canvas.height = 0;
+
+			delete item.canvas;
+		}
+	}
+
+	clear() {
+		this.trim(0);
 	}
 }
 
@@ -197,10 +312,10 @@ class TileManager {
 	private static debugDeltas: boolean = false;
 	private static debugDeltasDetail: boolean = false;
 	private static tiles: any = {}; // stores all tiles, keyed by coordinates, and cached, compressed deltas
+	private static canvasCache: CanvasCache = new CanvasCache(256);
+	public static tileSize: number = 256;
 
 	//private static _debugTime: any = {}; Reserved for future.
-
-	public static tileSize: number = 256;
 
 	public static initialize() {
 		if (window.Worker && !(window as any).ThisIsAMobileApp) {
@@ -217,10 +332,9 @@ class TileManager {
 		if (!(++this.gcCounter % 53)) this.garbageCollect();
 	}
 
-	// FIXME: could trim quite hard here, and do this at idle ...
 	// Set a high and low watermark of how many canvases we want
 	// and expire old ones
-	private static garbageCollect() {
+	private static garbageCollect(discardAll = false) {
 		// 4k screen -> 8Mpixel, each tile is 64kpixel uncompressed
 		var highNumCanvases = 250; // ~60Mb.
 		var lowNumCanvases = 125; // ~30Mb
@@ -231,8 +345,21 @@ class TileManager {
 		var highTileCount = 2 * 1024;
 		var lowTileCount = 1024;
 
+		if (discardAll) {
+			highNumCanvases = 0;
+			lowNumCanvases = 0;
+			highDeltaMemory = 0;
+			lowDeltaMemory = 0;
+			highTileCount = 0;
+			lowTileCount = 0;
+		}
+
 		if (this.debugDeltas)
 			window.app.console.log('Garbage collect! iter: ' + this.gcCounter);
+
+		// In case garbage collection was forced outside of maybeGarbageCollect, make sure future
+		// garbage collection doesn't happen prematurely.
+		this.gcCounter += (53 - (this.gcCounter % 53)) % 53;
 
 		/* uncomment to exercise me harder. */
 		/* highNumCanvases = 3; lowNumCanvases = 2;
@@ -306,24 +433,30 @@ class TileManager {
 				if (!tile.current) this.removeTile(keys[i]);
 			}
 		}
+
+		// Canvases are returned to a cache when reclaimed. Given
+		// (highNumCanvases - lowNumCanvases) canvases may regularly be returned to
+		// the cache, ensure the cache stays about that size.
+		// Under regular circumstances, this should do nothing and is a failsafe.
+		const canvasCacheTargetSize = highNumCanvases - lowNumCanvases;
+		if (this.canvasCache.size > canvasCacheTargetSize * 1.5)
+			this.canvasCache.trim(canvasCacheTargetSize);
 	}
 
 	// work hard to ensure we get a canvas context to render with
 	private static ensureContext(tile: Tile) {
-		var ctx;
-
 		this.maybeGarbageCollect();
 
 		// important this is after the garbagecollect
 		if (!tile.canvas) this.ensureCanvas(tile, null, false);
 
-		if ((ctx = tile.canvas.getContext('2d'))) return ctx;
+		if (tile.ctx) return tile.ctx;
 
 		// Not a good result - we ran out of canvas memory
 		this.garbageCollect();
 
 		if (!tile.canvas) this.ensureCanvas(tile, null, false);
-		if ((ctx = tile.canvas.getContext('2d'))) return ctx;
+		if (tile.ctx) return tile.ctx;
 
 		// Free non-current canvas' and start again.
 		if (this.debugDeltas)
@@ -332,21 +465,23 @@ class TileManager {
 			var t = this.tiles[key];
 			if (t && !t.current) this.reclaimTileCanvasMemory(t);
 		}
+		this.canvasCache.clear();
 		if (!tile.canvas) this.ensureCanvas(tile, null, false);
-		if ((ctx = tile.canvas.getContext('2d'))) return ctx;
+		if (tile.ctx) return tile.ctx;
 
 		if (this.debugDeltas)
 			window.app.console.log(
-				'Throw everything overbarod to free all tiles canvas memory',
+				'Throw everything overboard to free all tiles canvas memory',
 			);
 		for (var key in this.tiles) {
 			var t = this.tiles[key];
 			this.reclaimTileCanvasMemory(t);
 		}
+		this.canvasCache.clear();
 		if (!tile.canvas) this.ensureCanvas(tile, null, false);
-		ctx = tile.canvas.getContext('2d');
-		if (!ctx) window.app.console.log('Error: out of canvas memory.');
-		return ctx;
+		if (!tile.ctx) window.app.console.log('Error: out of canvas memory.');
+
+		return tile.ctx;
 	}
 
 	private static decompressPendingDeltas(message: string) {
@@ -754,9 +889,12 @@ class TileManager {
 
 		// Don't paint the tile, only dirty the sectionsContainer if it is in the visible area.
 		// _emitSlurpedTileEvents() will repaint canvas (if it is dirty).
-		if (app.map._docLayer._painter.coordsIntersectVisible(coords)) {
+		if (
+			app.isRectangleVisibleInTheDisplayedArea(
+				this.pixelCoordsToTwipTileBounds(coords),
+			)
+		)
 			app.sectionContainer.setDirty(coords);
-		}
 	}
 
 	private static createTile(coords: TileCoordData, key: string) {
@@ -1055,18 +1193,8 @@ class TileManager {
 		}
 	}
 
-	// Fix for cool#5876 allow immediate reuse of canvas context memory
-	// WKWebView has a hard limit on the number of bytes of canvas
-	// context memory that can be allocated. Reducing the canvas
-	// size to zero is a way to reduce the number of bytes counted
-	// against this limit.
 	private static reclaimTileCanvasMemory(tile: Tile) {
-		if (tile && tile.canvas) {
-			tile.canvas.width = 0;
-			tile.canvas.height = 0;
-			delete tile.canvas;
-		}
-		tile.imgDataCache = null;
+		this.canvasCache.releaseCanvas(tile);
 	}
 
 	private static initPreFetchPartTiles() {
@@ -1156,6 +1284,8 @@ class TileManager {
 			partMode[pmKey].push(coords);
 		}
 
+		var now = new Date();
+
 		for (var pmKey in partMode) {
 			// no keys method
 			var partTileQueue = partMode[pmKey];
@@ -1167,26 +1297,32 @@ class TileManager {
 			var tileWids = [];
 
 			var added: any = {}; // uniqify
+			var hasTiles = false;
 			for (var i = 0; i < partTileQueue.length; ++i) {
 				var coords = partTileQueue[i];
 				var key = coords.key();
+				var tile = this.tiles[key];
+
+				// don't send lots of duplicate, fast tilecombines
+				if (tile && tile.requestingTooFast(now)) continue;
+
 				// request each tile just once in these tilecombines
 				if (added[key]) continue;
 				added[key] = true;
+				hasTiles = true;
 
 				// build parameters
-				var tile = this.tiles[key];
 				tileWids.push(tile && tile.wireId !== undefined ? tile.wireId : 0);
 
 				const twips = new L.Point(
-					Math.floor(coords.x / this.tileSize) *
-						app.map._docLayer._tileWidthTwips,
-					Math.floor(coords.y / this.tileSize) *
-						app.map._docLayer._tileHeightTwips,
+					Math.floor(coords.x / this.tileSize) * app.tile.size.x,
+					Math.floor(coords.y / this.tileSize) * app.tile.size.y,
 				);
 
 				tilePositionsX.push(twips.x);
 				tilePositionsY.push(twips.y);
+
+				if (tile) tile.updateLastRequest(now);
 			}
 
 			var msg =
@@ -1197,10 +1333,10 @@ class TileManager {
 				' ' +
 				(mode !== 0 ? 'mode=' + mode + ' ' : '') +
 				'width=' +
-				app.map._docLayer._tileWidthPx +
+				this.tileSize +
 				' ' +
 				'height=' +
-				app.map._docLayer._tileHeightPx +
+				this.tileSize +
 				' ' +
 				'tileposx=' +
 				tilePositionsX.join(',') +
@@ -1212,11 +1348,12 @@ class TileManager {
 				tileWids.join(',') +
 				' ' +
 				'tilewidth=' +
-				app.map._docLayer._tileWidthTwips +
+				app.tile.size.x +
 				' ' +
 				'tileheight=' +
-				app.map._docLayer._tileHeightTwips;
-			app.socket.sendMessage(msg, '');
+				app.tile.size.y;
+			if (hasTiles) app.socket.sendMessage(msg, '');
+			else window.app.console.log('Skipped empty (too fast) tilecombine');
 		}
 	}
 
@@ -1417,6 +1554,15 @@ class TileManager {
 		return this.tiles[key];
 	}
 
+	private static pixelCoordsToTwipTileBounds(coords: TileCoordData): number[] {
+		const x = coords.x * app.pixelsToTwips;
+		const y = coords.y * app.pixelsToTwips;
+		const width = app.tile.size.x;
+		const height = app.tile.size.y;
+
+		return [x, y, width, height];
+	}
+
 	public static overlapInvalidatedRectangleWithView(
 		part: number,
 		mode: number,
@@ -1428,17 +1574,17 @@ class TileManager {
 
 		for (const key in this.tiles) {
 			const coords: TileCoordData = this.tiles[key].coords;
-			const tileRectangle = [coords.x, coords.y, this.tileSize, this.tileSize];
+			const tileRectangle = this.pixelCoordsToTwipTileBounds(coords);
 
 			if (
 				coords.part === part &&
 				coords.mode === mode &&
 				invalidatedRectangle.intersectsRectangle(tileRectangle)
 			) {
-				if (app.isRectangleVisibleInTheDisplayedArea(tileRectangle)) {
-					this.invalidateTile(key, wireId);
+				if (app.isRectangleVisibleInTheDisplayedArea(tileRectangle))
 					needsNewTiles = true;
-				}
+
+				this.invalidateTile(key, wireId);
 			}
 		}
 
@@ -1527,13 +1673,8 @@ class TileManager {
 		var validTileRange = new L.Bounds(
 			new L.Point(0, 0),
 			new L.Point(
-				Math.floor(
-					(this._docLayer._docWidthTwips - 1) / this._docLayer._tileWidthTwips,
-				),
-				Math.floor(
-					(this._docLayer._docHeightTwips - 1) /
-						this._docLayer._tileHeightTwips,
-				),
+				Math.floor((app.file.size.x - 1) / app.tile.size.x),
+				Math.floor((app.file.size.y - 1) / app.tile.size.y),
 			),
 		);
 
@@ -1768,8 +1909,7 @@ class TileManager {
 				'Unusual: Delta sent - but we have no keyframe for ' + key,
 			);
 			// force keyframe
-			tile.wireId = 0;
-			tile.invalidFrom = 0;
+			tile.forceKeyframe();
 			tile.gcErrors++;
 
 			// queue a later fetch of this and any other
@@ -1810,14 +1950,19 @@ class TileManager {
 		this.garbageCollect();
 	}
 
+	public static discardAllCache() {
+		// update tile.current for the view
+		if (app.file.fileBasedView) this.updateFileBasedView(true);
+
+		this.garbageCollect(true);
+	}
+
 	public static isValidTile(coords: TileCoordData) {
 		if (coords.x < 0 || coords.y < 0) {
 			return false;
 		} else if (
-			(coords.x / this.tileSize) * app.map._docLayer._tileWidthTwips >
-				app.map._docLayer._docWidthTwips ||
-			(coords.y / this.tileSize) * app.map._docLayer._tileHeightTwips >
-				app.map._docLayer._docHeightTwips
+			coords.x * app.pixelsToTwips > app.file.size.x ||
+			coords.y * app.pixelsToTwips > app.file.size.y
 		) {
 			return false;
 		} else return true;
@@ -1832,6 +1977,8 @@ class TileManager {
 	}
 
 	public static update(center: any = null, zoom: number = null) {
+		if (app.file.writer.multiPageView) return;
+
 		const map: any = app.map;
 
 		if (
@@ -2036,6 +2183,39 @@ class TileManager {
 		);
 	}
 
+	/*
+		Checks the visible tiles in current zoom level.
+		Marks the visible ones as current.
+	*/
+	public static udpateLayoutView(bounds: any): any {
+		const queue = this.getMissingTiles(bounds, Math.round(app.map.getZoom()));
+
+		if (queue.length > 0) this.addTiles(queue, false);
+	}
+
+	public static getVisibleCoordList(
+		rectangle: cool.SimpleRectangle = app.file.viewedRectangle,
+	) {
+		const coordList = Array<TileCoordData>();
+		const zoom = app.map.getZoom();
+
+		for (const [, value] of Object.entries(this.tiles)) {
+			const coords = (value as Tile).coords;
+			if (
+				coords.z === zoom &&
+				rectangle.intersectsRectangle([
+					coords.x * app.pixelsToTwips,
+					coords.y * app.pixelsToTwips,
+					this.tileSize * app.pixelsToTwips,
+					this.tileSize * app.pixelsToTwips,
+				])
+			)
+				coordList.push(coords);
+		}
+
+		return coordList;
+	}
+
 	public static updateFileBasedView(
 		checkOnly: boolean = false,
 		zoomFrameBounds: any = null,
@@ -2049,16 +2229,16 @@ class TileManager {
 		if (!checkOnly) {
 			// zoomFrameBounds and forZoom params were introduced to work only in checkOnly mode.
 			window.app.console.assert(
-				zoomFrameBounds === undefined,
+				zoomFrameBounds === null,
 				'zoomFrameBounds must only be supplied when checkOnly is true',
 			);
 			window.app.console.assert(
-				forZoom === undefined,
+				forZoom === null,
 				'forZoom must only be supplied when checkOnly is true',
 			);
 		}
 
-		if (forZoom !== undefined) {
+		if (forZoom !== null) {
 			window.app.console.assert(
 				zoomFrameBounds,
 				'zoomFrameBounds must be valid when forZoom is specified',
@@ -2069,7 +2249,7 @@ class TileManager {
 		var currZoom = Math.round(app.map.getZoom());
 		var relScale = currZoom == zoom ? 1 : app.map.getZoomScale(zoom, currZoom);
 
-		var ratio = (this.tileSize * relScale) / app.map._docLayer._tileHeightTwips;
+		var ratio = (this.tileSize * relScale) / app.tile.size.y;
 		var partHeightPixels = Math.round(
 			(app.map._docLayer._partHeightTwips +
 				app.map._docLayer._spaceBetweenParts) *
@@ -2087,20 +2267,19 @@ class TileManager {
 
 		if (intersectionAreaRectangle) {
 			var minLocalX =
-				Math.floor(intersectionAreaRectangle[0] / app.tile.size.pixels[0]) *
-				app.tile.size.pixels[0];
+				Math.floor(intersectionAreaRectangle[0] / app.tile.size.pX) *
+				app.tile.size.pX;
 			var maxLocalX =
 				Math.floor(
 					(intersectionAreaRectangle[0] + intersectionAreaRectangle[2]) /
-						app.tile.size.pixels[0],
-				) * app.tile.size.pixels[0];
+						app.tile.size.pX,
+				) * app.tile.size.pX;
 
 			var startPart = Math.floor(
 				intersectionAreaRectangle[1] / partHeightPixels,
 			);
 			var startY = app.file.viewedRectangle.pY1 - startPart * partHeightPixels;
-			startY =
-				Math.floor(startY / app.tile.size.pixels[1]) * app.tile.size.pixels[1];
+			startY = Math.floor(startY / app.tile.size.pY) * app.tile.size.pY;
 
 			var endPart = Math.ceil(
 				(intersectionAreaRectangle[1] + intersectionAreaRectangle[3]) /
@@ -2110,19 +2289,16 @@ class TileManager {
 				app.file.viewedRectangle.pY1 +
 				app.file.viewedRectangle.pY2 -
 				endPart * partHeightPixels;
-			endY =
-				Math.floor(endY / app.tile.size.pixels[1]) * app.tile.size.pixels[1];
+			endY = Math.floor(endY / app.tile.size.pY) * app.tile.size.pY;
 
-			var vTileCountPerPart = Math.ceil(
-				partHeightPixels / app.tile.size.pixels[1],
-			);
+			var vTileCountPerPart = Math.ceil(partHeightPixels / app.tile.size.pY);
 
 			for (var i = startPart; i < endPart; i++) {
-				for (var j = minLocalX; j <= maxLocalX; j += app.tile.size.pixels[0]) {
+				for (var j = minLocalX; j <= maxLocalX; j += app.tile.size.pX) {
 					for (
 						var k = 0;
-						k <= vTileCountPerPart * app.tile.size.pixels[0];
-						k += app.tile.size.pixels[1]
+						k <= vTileCountPerPart * app.tile.size.pX;
+						k += app.tile.size.pY
 					)
 						if (
 							(i !== startPart || k >= startY) &&
@@ -2177,6 +2353,7 @@ class TileManager {
 		if (!tile) return;
 
 		tile.invalidateCount++;
+		tile.allowFastRequest();
 
 		if (app.map._debug.tileDataOn) {
 			app.map._debug.tileDataAddInvalidate();
@@ -2199,14 +2376,7 @@ class TileManager {
 	public static ensureCanvas(tile: Tile, now: any, forPrefetch: any) {
 		if (!tile) return;
 		if (!tile.canvas) {
-			// This allocation is usually cheap and reliable,
-			// getting the canvas context, not so much.
-			var canvas = document.createElement('canvas');
-			canvas.width = this.tileSize;
-			canvas.height = this.tileSize;
-
-			tile.canvas = canvas;
-
+			this.canvasCache.acquireCanvas(tile);
 			this.rehydrateTile(tile);
 		}
 		if (!forPrefetch) {

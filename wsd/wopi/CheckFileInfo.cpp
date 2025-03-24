@@ -41,6 +41,8 @@ void CheckFileInfo::checkFileInfo(int redirectLimit)
     http::Session::FinishedCallback finishedCallback =
         [selfWeak = weak_from_this(), this, startTime, uriAnonym, redirectLimit](const std::shared_ptr<http::Session>& session)
     {
+        session->asyncShutdown();
+
         std::shared_ptr<CheckFileInfo> selfLifecycle = selfWeak.lock();
         if (!selfLifecycle)
             return;
@@ -62,7 +64,7 @@ void CheckFileInfo::checkFileInfo(int redirectLimit)
             statusCode == http::StatusCode::TemporaryRedirect ||
             statusCode == http::StatusCode::PermanentRedirect)
         {
-            if (redirectLimit)
+            if (redirectLimit != 0)
             {
                 const std::string location = httpResponse->get("Location");
                 LOG_INF("WOPI::CheckFileInfo redirect to URI [" << COOLWSD::anonymizeUrl(location)
@@ -72,11 +74,9 @@ void CheckFileInfo::checkFileInfo(int redirectLimit)
                 checkFileInfo(redirectLimit - 1);
                 return;
             }
-            else
-            {
-                LOG_WRN("WOPI::CheckFileInfo redirected too many times. Giving up on URI ["
-                        << uriAnonym << ']');
-            }
+
+            LOG_WRN("WOPI::CheckFileInfo redirected too many times. Giving up on URI [" << uriAnonym
+                                                                                        << ']');
         }
 
         std::chrono::milliseconds callDurationMs =
@@ -112,32 +112,30 @@ void CheckFileInfo::checkFileInfo(int redirectLimit)
             _state = State::Fail;
 
             if (httpResponse->statusLine().statusCode() == http::StatusCode::Forbidden)
-            {
                 LOG_ERR("Access denied to [" << uriAnonym << ']');
-                return;
-            }
-
-            LOG_ERR("Invalid URI or access denied to [" << uriAnonym << ']');
-            return;
-        }
-
-        if (parseResponseAndValidate(wopiResponse))
-        {
-            LOG_DBG("WOPI::CheckFileInfo ("
-                    << callDurationMs
-                    << "): " << (COOLWSD::AnonymizeUserData ? "obfuscated" : wopiResponse));
-
-            _state = State::Pass;
+            else
+                LOG_ERR("Invalid URI or access denied to [" << uriAnonym << ']');
         }
         else
         {
-            _state = State::Fail;
+            if (parseResponseAndValidate(wopiResponse))
+            {
+                LOG_DBG("WOPI::CheckFileInfo ("
+                        << callDurationMs
+                        << "): " << (COOLWSD::AnonymizeUserData ? "obfuscated" : wopiResponse));
 
-            LOG_ERR("WOPI::CheckFileInfo ("
-                    << callDurationMs
-                    << ") failed or no valid JSON payload returned. Access denied. "
-                       "Original response: ["
-                    << COOLProtocol::getAbbreviatedMessage(wopiResponse) << ']');
+                _state = State::Pass;
+            }
+            else
+            {
+                _state = State::Fail;
+
+                LOG_ERR("WOPI::CheckFileInfo ("
+                        << callDurationMs
+                        << ") failed or no valid JSON payload returned. Access denied. "
+                           "Original response: ["
+                        << COOLProtocol::getAbbreviatedMessage(wopiResponse) << ']');
+            }
         }
 
         if (_onFinishCallback)

@@ -55,7 +55,7 @@ class HostEntry
     std::string makeIPAddress(const sockaddr* ai_addr);
 
 public:
-    HostEntry(const std::string& desc, const char* port);
+    HostEntry(const std::string& desc);
     ~HostEntry();
 
     bool good() const { return _saved_errno == 0 && _eaino == 0; }
@@ -87,7 +87,7 @@ std::vector<std::string> resolveAddresses(const std::string& addressToCheck);
 
 /// Connect to an end-point at the given host and port and return StreamSocket.
 std::shared_ptr<StreamSocket>
-connect(const std::string& host, const std::string& port, const bool isSSL,
+connect(const std::string& host, const std::string& port, bool isSSL,
         const std::shared_ptr<ProtocolHandlerInterface>& protocolHandler);
 
 enum class AsyncConnectResult{
@@ -102,10 +102,9 @@ enum class AsyncConnectResult{
 
 typedef std::function<void(std::shared_ptr<StreamSocket>, AsyncConnectResult result)> asyncConnectCB;
 
-void
-asyncConnect(const std::string& host, const std::string& port, const bool isSSL,
-             const std::shared_ptr<ProtocolHandlerInterface>& protocolHandler,
-             const asyncConnectCB& asyncCb);
+void asyncConnect(const std::string& host, const std::string& port, bool isSSL,
+                  const std::shared_ptr<ProtocolHandlerInterface>& protocolHandler,
+                  const asyncConnectCB& asyncCb);
 
 /// Connect to an end-point at the given @uri and return StreamSocket.
 std::shared_ptr<StreamSocket>

@@ -11,6 +11,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Statubar tests.', function
 		if (Cypress.env('INTEGRATION') === 'nextcloud') {
 			desktopHelper.showStatusBarIfHidden ();
 		}
+		desktopHelper.shouldHaveZoomLevel('70');
 	});
 
 	it('Selected slide.', function() {
@@ -33,7 +34,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Statubar tests.', function
 	it('Select zoom level.', function() {
 		desktopHelper.resetZoomLevel();
 		desktopHelper.shouldHaveZoomLevel('100');
-		desktopHelper.selectZoomLevel('280');
+		desktopHelper.selectZoomLevel('280', false);
 		desktopHelper.shouldHaveZoomLevel('280');
 	});
 });
