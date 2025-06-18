@@ -1001,7 +1001,7 @@ bool FileServerRequestHandler::handleRequest(const HTTPRequest& request,
 
         if (endPoint == "welcome.html")
         {
-            preprocessWelcomeFile(request, response, requestDetails, message, socket);
+            // preprocessWelcomeFile(request, response, requestDetails, message, socket);
             return true;
         }
 
