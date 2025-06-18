@@ -1,12 +1,9 @@
 name: Build nightly docker image
 
 on:
-  workflow_dispatch:
-    inputs:
-      description:
-        description: 'by violet'
-        required: false
-        default: 'Manual trigger by user'
+  push:
+    branches:
+      - dev
 
 jobs:
   docker:
